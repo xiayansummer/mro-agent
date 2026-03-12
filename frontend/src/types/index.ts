@@ -9,7 +9,7 @@ export interface SkuItem {
   item_name: string;
   brand_name: string | null;
   specification: string | null;
-  unit: string | null;
+  mfg_sku: string | null;
   l1_category_name: string | null;
   l2_category_name: string | null;
   l3_category_name: string | null;

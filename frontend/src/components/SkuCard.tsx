@@ -43,10 +43,10 @@ export default function SkuCard({ sku, index }: Props) {
             <span className="text-gray-600">{sku.specification}</span>
           </div>
         )}
-        {sku.unit && (
+        {sku.mfg_sku && (
           <div className="flex">
-            <span className="w-12 shrink-0 text-gray-400">单位</span>
-            <span className="text-gray-600">{sku.unit}</span>
+            <span className="w-12 shrink-0 text-gray-400">厂商SKU</span>
+            <span className="text-gray-600">{sku.mfg_sku}</span>
           </div>
         )}
       </div>

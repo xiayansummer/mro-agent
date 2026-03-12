@@ -13,7 +13,7 @@ class ItemSample(Base):
     item_name = Column(String(500))
     brand_name = Column(String(200))
     specification = Column(String(500))
-    unit = Column(String(50))
+    mfg_sku = Column(String(100))
     l1_category_name = Column(String(200))
     l2_category_name = Column(String(200))
     l3_category_name = Column(String(200))
@@ -26,7 +26,7 @@ class ItemSample(Base):
             "item_name": self.item_name,
             "brand_name": self.brand_name,
             "specification": self.specification,
-            "unit": self.unit,
+            "mfg_sku": self.mfg_sku,
             "l1_category_name": self.l1_category_name,
             "l2_category_name": self.l2_category_name,
             "l3_category_name": self.l3_category_name,
