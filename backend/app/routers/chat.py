@@ -1,8 +1,6 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy.ext.asyncio import AsyncSession
-from app.db.mysql import get_session
 from app.services.agent import handle_message
 
 router = APIRouter()
@@ -14,9 +12,9 @@ class ChatRequest(BaseModel):
 
 
 @router.post("/chat")
-async def chat(req: ChatRequest, db: AsyncSession = Depends(get_session)):
+async def chat(req: ChatRequest):
     return StreamingResponse(
-        handle_message(req.session_id, req.message, db),
+        handle_message(req.session_id, req.message),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

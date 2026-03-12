@@ -55,6 +55,17 @@ export default function ChatWindow({
     return () => abortRef.current?.abort();
   }, []);
 
+  // Track if user has scrolled up
+  const [showScrollBtn, setShowScrollBtn] = useState(false);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+
+  const handleScroll = useCallback(() => {
+    const el = messagesContainerRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    setShowScrollBtn(distanceFromBottom > 150);
+  }, []);
+
   const displayMessages =
     messages.length === 0 ? [WELCOME_MESSAGE] : messages;
 
@@ -198,13 +209,30 @@ export default function ChatWindow({
       </header>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-4">
+      <div
+        ref={messagesContainerRef}
+        onScroll={handleScroll}
+        className="flex-1 overflow-y-auto px-4 py-4 relative"
+      >
         <div className="max-w-3xl mx-auto">
           {displayMessages.map((msg) => (
             <MessageBubble key={msg.id} message={msg} />
           ))}
           <div ref={bottomRef} />
         </div>
+
+        {/* Scroll to bottom button */}
+        {showScrollBtn && (
+          <button
+            onClick={scrollToBottom}
+            className="fixed bottom-24 right-6 w-10 h-10 bg-white border border-gray-200 rounded-full shadow-lg flex items-center justify-center text-gray-500 hover:text-gray-700 hover:shadow-xl transition-all z-10"
+            title="滚动到底部"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+            </svg>
+          </button>
+        )}
       </div>
 
       {/* Input */}

@@ -82,7 +82,7 @@ async def search_skus(session: AsyncSession, parsed_intent: dict, limit: int = 2
 
     where_clause = " AND ".join(conditions)
     query = f"""
-        SELECT item_code, item_name, brand_name, specification,
+        SELECT item_code, item_name, brand_name, specification, unit,
                l1_category_name, l2_category_name, l3_category_name, l4_category_name,
                attribute_details
         FROM t_item_sample
@@ -100,11 +100,12 @@ async def search_skus(session: AsyncSession, parsed_intent: dict, limit: int = 2
             "item_name": row[1],
             "brand_name": row[2],
             "specification": row[3],
-            "l1_category_name": row[4],
-            "l2_category_name": row[5],
-            "l3_category_name": row[6],
-            "l4_category_name": row[7],
-            "attribute_details": row[8],
+            "unit": row[4],
+            "l1_category_name": row[5],
+            "l2_category_name": row[6],
+            "l3_category_name": row[7],
+            "l4_category_name": row[8],
+            "attribute_details": row[9],
         }
         for row in rows
     ]
