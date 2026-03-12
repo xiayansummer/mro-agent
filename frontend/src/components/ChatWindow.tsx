@@ -113,13 +113,8 @@ export default function ChatWindow({
             );
             updateMessages(next);
           },
-          onThinking: (msg) => {
-            const next = messagesRef.current.map((m) =>
-              m.id === assistantMsgId && !m.content
-                ? { ...m, content: msg }
-                : m
-            );
-            updateMessages(next);
+          onThinking: () => {
+            // Loading dots animation already handles the visual indicator
           },
           onDone: () => {
             const next = messagesRef.current.map((m) =>
