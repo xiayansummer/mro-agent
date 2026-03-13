@@ -6,105 +6,166 @@ import SkuCard from "./SkuCard";
 
 interface Props {
   message: ChatMessage;
+  isFirst?: boolean;
 }
 
-export default function MessageBubble({ message }: Props) {
+export default function MessageBubble({ message, isFirst }: Props) {
   const isUser = message.role === "user";
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
     try {
       await navigator.clipboard.writeText(message.content);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
     } catch {
-      // fallback
       const ta = document.createElement("textarea");
       ta.value = message.content;
       document.body.appendChild(ta);
       ta.select();
       document.execCommand("copy");
       document.body.removeChild(ta);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
     }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   };
 
-  return (
-    <div className={`group flex ${isUser ? "justify-end" : "justify-start"} mb-4`}>
-      <div
-        className={`max-w-[85%] ${
-          isUser
-            ? "bg-blue-600 text-white rounded-2xl rounded-br-md px-4 py-2.5"
-            : "bg-white text-gray-800 rounded-2xl rounded-bl-md px-4 py-3 shadow-sm border border-gray-100"
-        }`}
-      >
-        {!isUser && (
-          <div className="flex items-center gap-1.5 mb-1.5">
-            <div className="w-5 h-5 bg-blue-100 rounded-full flex items-center justify-center">
-              <span className="text-xs text-blue-600 font-bold">A</span>
-            </div>
-            <span className="text-xs text-gray-400 font-medium">AI 助手</span>
-          </div>
-        )}
-
-        <div
-          className={`text-sm leading-relaxed ${
-            isUser ? "whitespace-pre-wrap" : "markdown-body"
-          }`}
-        >
-          {message.isStreaming && !message.content ? (
-            <span className="inline-flex items-center gap-1 py-1">
-              <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce [animation-delay:-0.3s]" />
-              <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce [animation-delay:-0.15s]" />
-              <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" />
-            </span>
-          ) : isUser ? (
-            message.content
-          ) : message.isStreaming ? (
-            <>
-              <span className="whitespace-pre-wrap">{message.content}</span>
-              <span className="inline-block w-0.5 h-4 bg-blue-500 ml-0.5 align-middle animate-blink" />
-            </>
-          ) : (
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-              {message.content}
-            </ReactMarkdown>
-          )}
+  if (isUser) {
+    return (
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
+        <div style={{
+          maxWidth: "72%",
+          background: "#1e2334",
+          color: "#e8eaf0",
+          borderRadius: "12px 12px 3px 12px",
+          padding: "10px 14px",
+          fontSize: 14,
+          lineHeight: 1.7,
+          whiteSpace: "pre-wrap",
+          wordBreak: "break-word",
+        }}>
+          {message.content}
         </div>
+      </div>
+    );
+  }
 
-        {message.skuResults && message.skuResults.length > 0 && (
-          <div className="mt-3 grid grid-cols-1 gap-2">
-            {message.skuResults.map((sku, i) => (
-              <SkuCard key={sku.item_code} sku={sku} index={i} />
-            ))}
+  // Assistant message
+  return (
+    <div style={{ display: "flex", gap: 10, marginBottom: 16, alignItems: "flex-start" }} className="animate-fade-in msg-assistant">
+      {/* Avatar */}
+      <div style={{
+        width: 26, height: 26,
+        background: "var(--accent)",
+        borderRadius: 5,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        flexShrink: 0,
+        marginTop: 3,
+      }}>
+        <span style={{ color: "#fff", fontWeight: 700, fontSize: 11, fontFamily: "var(--mono)" }}>AI</span>
+      </div>
+
+      {/* Content */}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        {/* Thinking / loading */}
+        {message.isStreaming && !message.content && (
+          <div style={{ display: "flex", gap: 4, padding: "12px 0" }}>
+            <span className="thinking-dot" />
+            <span className="thinking-dot" />
+            <span className="thinking-dot" />
           </div>
         )}
 
-        {/* Copy button for assistant messages */}
-        {!isUser && !message.isStreaming && message.content && (
-          <div className="flex justify-end mt-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-            <button
-              onClick={handleCopy}
-              className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600 transition-colors px-1.5 py-0.5 rounded hover:bg-gray-50"
-              title="复制内容"
-            >
-              {copied ? (
-                <>
-                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                  <span>已复制</span>
-                </>
-              ) : (
-                <>
-                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                  </svg>
-                  <span>复制</span>
-                </>
-              )}
-            </button>
+        {/* SKU results above text */}
+        {message.skuResults && message.skuResults.length > 0 && (
+          <div style={{ marginBottom: 12 }}>
+            <div style={{
+              fontSize: 11,
+              fontFamily: "var(--mono)",
+              color: "var(--text-muted)",
+              marginBottom: 8,
+              display: "flex", alignItems: "center", gap: 6,
+            }}>
+              <span style={{
+                display: "inline-block",
+                width: 6, height: 6,
+                borderRadius: "50%",
+                background: "var(--accent)",
+              }} />
+              找到 {message.skuResults.length} 个匹配产品
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 8 }}>
+              {message.skuResults.map((sku, i) => (
+                <SkuCard key={sku.item_code} sku={sku} index={i} />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Text content */}
+        {message.content && (
+          <div style={{
+            background: "var(--surface)",
+            border: "1px solid var(--border)",
+            borderRadius: 8,
+            padding: "14px 16px",
+            position: "relative",
+          }}>
+            {message.isStreaming ? (
+              <div className="md" style={{ whiteSpace: "pre-wrap" }}>
+                {message.content}
+                <span
+                  style={{
+                    display: "inline-block",
+                    width: 2, height: "0.9em",
+                    background: "var(--accent)",
+                    marginLeft: 2,
+                    verticalAlign: "middle",
+                  }}
+                  className="animate-blink"
+                />
+              </div>
+            ) : (
+              <>
+                <div className="md">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {message.content}
+                  </ReactMarkdown>
+                </div>
+
+                {/* Copy button */}
+                <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8, opacity: 0 }} className="group-hover:opacity-100 copy-btn-wrap">
+                  <button
+                    onClick={handleCopy}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 4,
+                      background: "none", border: "1px solid var(--border)",
+                      borderRadius: 4, padding: "3px 8px",
+                      color: copied ? "#16a34a" : "var(--text-muted)",
+                      fontSize: 11, cursor: "pointer",
+                      transition: "all 0.15s",
+                    }}
+                    onMouseEnter={e => (e.currentTarget.style.borderColor = "var(--border-strong)")}
+                    onMouseLeave={e => (e.currentTarget.style.borderColor = "var(--border)")}
+                  >
+                    {copied ? (
+                      <>
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                          <path d="M5 13l4 4L19 7" />
+                        </svg>
+                        已复制
+                      </>
+                    ) : (
+                      <>
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                          <rect x="9" y="9" width="13" height="13" rx="2" />
+                          <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+                        </svg>
+                        复制
+                      </>
+                    )}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         )}
       </div>

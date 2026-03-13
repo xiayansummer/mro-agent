@@ -22,17 +22,14 @@ interface Props {
   onToggleSidebar: () => void;
 }
 
-export default function ChatWindow({
-  sessionId,
-  messages,
-  onMessagesChange,
-  onToggleSidebar,
-}: Props) {
+export default function ChatWindow({ sessionId, messages, onMessagesChange, onToggleSidebar }: Props) {
   const [isLoading, setIsLoading] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
   const abortRef = useRef<AbortController | null>(null);
+  const [showScrollBtn, setShowScrollBtn] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   const updateMessages = useCallback(
     (msgs: ChatMessage[]) => {
@@ -46,46 +43,23 @@ export default function ChatWindow({
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, []);
 
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages, scrollToBottom]);
-
-  // Cleanup abort on unmount
-  useEffect(() => {
-    return () => abortRef.current?.abort();
-  }, []);
-
-  // Track if user has scrolled up
-  const [showScrollBtn, setShowScrollBtn] = useState(false);
-  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { scrollToBottom(); }, [messages, scrollToBottom]);
+  useEffect(() => { return () => abortRef.current?.abort(); }, []);
 
   const handleScroll = useCallback(() => {
-    const el = messagesContainerRef.current;
+    const el = containerRef.current;
     if (!el) return;
-    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    setShowScrollBtn(distanceFromBottom > 150);
+    setShowScrollBtn(el.scrollHeight - el.scrollTop - el.clientHeight > 150);
   }, []);
 
-  const displayMessages =
-    messages.length === 0 ? [WELCOME_MESSAGE] : messages;
+  const displayMessages = messages.length === 0 ? [WELCOME_MESSAGE] : messages;
 
-  const handleStop = useCallback(() => {
-    abortRef.current?.abort();
-  }, []);
+  const handleStop = useCallback(() => { abortRef.current?.abort(); }, []);
 
   const handleSend = async (text: string) => {
-    const userMsg: ChatMessage = {
-      id: generateId(),
-      role: "user",
-      content: text,
-    };
+    const userMsg: ChatMessage = { id: generateId(), role: "user", content: text };
     const assistantMsgId = generateId();
-    const assistantMsg: ChatMessage = {
-      id: assistantMsgId,
-      role: "assistant",
-      content: "",
-      isStreaming: true,
-    };
+    const assistantMsg: ChatMessage = { id: assistantMsgId, role: "assistant", content: "", isStreaming: true };
 
     const updated = [...messagesRef.current, userMsg, assistantMsg];
     updateMessages(updated);
@@ -95,56 +69,38 @@ export default function ChatWindow({
     abortRef.current = abortController;
 
     try {
-      await sendMessage(
-        sessionId,
-        text,
-        {
-          onText: (chunk) => {
-            const next = messagesRef.current.map((m) =>
-              m.id === assistantMsgId
-                ? { ...m, content: m.content + chunk }
-                : m
-            );
-            updateMessages(next);
-          },
-          onSkuResults: (results) => {
-            const next = messagesRef.current.map((m) =>
-              m.id === assistantMsgId ? { ...m, skuResults: results } : m
-            );
-            updateMessages(next);
-          },
-          onThinking: () => {
-            // Loading dots animation already handles the visual indicator
-          },
-          onDone: () => {
-            const next = messagesRef.current.map((m) =>
-              m.id === assistantMsgId
-                ? { ...m, isStreaming: false }
-                : m
-            );
-            updateMessages(next);
-            setIsLoading(false);
-          },
-          onError: (err) => {
-            const next = messagesRef.current.map((m) =>
-              m.id === assistantMsgId
-                ? {
-                    ...m,
-                    content: m.content
-                      ? m.content + `\n\n⚠ ${err}`
-                      : `⚠ ${err}`,
-                    isStreaming: false,
-                  }
-                : m
-            );
-            updateMessages(next);
-            setIsLoading(false);
-          },
+      await sendMessage(sessionId, text, {
+        onText: (chunk) => {
+          const next = messagesRef.current.map((m) =>
+            m.id === assistantMsgId ? { ...m, content: m.content + chunk } : m
+          );
+          updateMessages(next);
         },
-        abortController.signal
-      );
+        onSkuResults: (results) => {
+          const next = messagesRef.current.map((m) =>
+            m.id === assistantMsgId ? { ...m, skuResults: results } : m
+          );
+          updateMessages(next);
+        },
+        onThinking: () => {},
+        onDone: () => {
+          const next = messagesRef.current.map((m) =>
+            m.id === assistantMsgId ? { ...m, isStreaming: false } : m
+          );
+          updateMessages(next);
+          setIsLoading(false);
+        },
+        onError: (err) => {
+          const next = messagesRef.current.map((m) =>
+            m.id === assistantMsgId
+              ? { ...m, content: m.content ? m.content + `\n\n⚠ ${err}` : `⚠ ${err}`, isStreaming: false }
+              : m
+          );
+          updateMessages(next);
+          setIsLoading(false);
+        },
+      }, abortController.signal);
     } catch (err: unknown) {
-      // Aborted by user
       if (err instanceof DOMException && err.name === "AbortError") {
         const next = messagesRef.current.map((m) =>
           m.id === assistantMsgId ? { ...m, isStreaming: false } : m
@@ -153,13 +109,9 @@ export default function ChatWindow({
         setIsLoading(false);
         return;
       }
-      // Network error
-      const errorMsg =
-        err instanceof Error ? err.message : "网络连接失败，请检查网络后重试";
+      const errorMsg = err instanceof Error ? err.message : "网络连接失败，请检查网络后重试";
       const next = messagesRef.current.map((m) =>
-        m.id === assistantMsgId
-          ? { ...m, content: `⚠ ${errorMsg}`, isStreaming: false }
-          : m
+        m.id === assistantMsgId ? { ...m, content: `⚠ ${errorMsg}`, isStreaming: false } : m
       );
       updateMessages(next);
       setIsLoading(false);
@@ -167,76 +119,101 @@ export default function ChatWindow({
   };
 
   return (
-    <div className="flex flex-col h-screen bg-gray-50 flex-1 min-w-0">
+    <div style={{ display: "flex", flexDirection: "column", height: "100vh", background: "var(--bg)", flex: 1, minWidth: 0 }}>
       {/* Header */}
-      <header className="bg-white border-b border-gray-200 px-4 py-3 shrink-0">
-        <div className="max-w-3xl mx-auto flex items-center gap-3">
-          <button
-            onClick={onToggleSidebar}
-            className="md:hidden p-1.5 -ml-1.5 rounded-lg hover:bg-gray-100 text-gray-600"
-          >
-            <svg
-              className="w-5 h-5"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M4 6h16M4 12h16M4 18h16"
-              />
-            </svg>
-          </button>
-          <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
-            <span className="text-white font-bold text-sm">M</span>
+      <header style={{
+        background: "var(--surface)",
+        borderBottom: "1px solid var(--border)",
+        padding: "0 24px",
+        height: 52,
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+        flexShrink: 0,
+      }}>
+        <button
+          onClick={onToggleSidebar}
+          className="md:hidden"
+          style={{
+            background: "none", border: "none", cursor: "pointer",
+            color: "var(--text-secondary)", padding: 4, borderRadius: 4, marginLeft: -4,
+          }}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <path d="M3 6h18M3 12h18M3 18h18" />
+          </svg>
+        </button>
+
+        <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{
+            width: 26, height: 26,
+            background: "var(--accent)",
+            borderRadius: 5,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            flexShrink: 0,
+          }}>
+            <span style={{ color: "#fff", fontWeight: 700, fontSize: 12, fontFamily: "var(--mono)" }}>M</span>
           </div>
           <div>
-            <h1 className="text-base font-semibold text-gray-900">
+            <span style={{ fontWeight: 600, fontSize: 14, color: "var(--text-primary)" }}>
               MRO 紧固件 AI 助手
-            </h1>
-            <p className="text-xs text-gray-500">
-              智能产品推荐 · 200万+ SKU
-            </p>
+            </span>
+            <span style={{
+              marginLeft: 10, fontSize: 12, color: "var(--text-muted)",
+              fontFamily: "var(--mono)",
+            }}>
+              200万+ SKU
+            </span>
           </div>
         </div>
+
+        {isLoading && (
+          <div style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--accent)", fontSize: 12 }}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ animation: "spin-slow 1s linear infinite" }}>
+              <path strokeLinecap="round" d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+            </svg>
+            搜索中
+          </div>
+        )}
       </header>
 
       {/* Messages */}
       <div
-        ref={messagesContainerRef}
+        ref={containerRef}
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto px-4 py-4 relative"
+        style={{ flex: 1, overflowY: "auto", padding: "20px 16px", position: "relative" }}
       >
-        <div className="max-w-3xl mx-auto">
-          {displayMessages.map((msg) => (
-            <MessageBubble key={msg.id} message={msg} />
+        <div style={{ maxWidth: 780, margin: "0 auto" }}>
+          {displayMessages.map((msg, i) => (
+            <MessageBubble key={msg.id} message={msg} isFirst={i === 0} />
           ))}
           <div ref={bottomRef} />
         </div>
 
-        {/* Scroll to bottom button */}
         {showScrollBtn && (
           <button
             onClick={scrollToBottom}
-            className="fixed bottom-24 right-6 w-10 h-10 bg-white border border-gray-200 rounded-full shadow-lg flex items-center justify-center text-gray-500 hover:text-gray-700 hover:shadow-xl transition-all z-10"
+            style={{
+              position: "fixed", bottom: 88, right: 24,
+              width: 34, height: 34,
+              background: "var(--surface)",
+              border: "1px solid var(--border)",
+              borderRadius: "50%",
+              boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              cursor: "pointer", color: "var(--text-secondary)",
+              zIndex: 10,
+            }}
             title="滚动到底部"
           >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+              <path d="M6 9l6 6 6-6" />
             </svg>
           </button>
         )}
       </div>
 
-      {/* Input */}
-      <ChatInput
-        onSend={handleSend}
-        onStop={handleStop}
-        disabled={isLoading}
-        isLoading={isLoading}
-      />
+      <ChatInput onSend={handleSend} onStop={handleStop} disabled={isLoading} isLoading={isLoading} />
     </div>
   );
 }

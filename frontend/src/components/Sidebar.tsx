@@ -25,150 +25,182 @@ function formatRelativeTime(timestamp: number): string {
 }
 
 export default function Sidebar({
-  sessions,
-  activeId,
-  isOpen,
-  onNewChat,
-  onSelectChat,
-  onDeleteChat,
-  onClose,
+  sessions, activeId, isOpen, onNewChat, onSelectChat, onDeleteChat, onClose,
 }: Props) {
   const sorted = [...sessions].sort((a, b) => b.createdAt - a.createdAt);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
   return (
     <>
-      {/* Mobile overlay backdrop */}
       {isOpen && (
         <div
-          className="fixed inset-0 bg-black/40 z-40 md:hidden"
+          className="fixed inset-0 z-40 md:hidden"
+          style={{ background: "rgba(0,0,0,0.5)" }}
           onClick={onClose}
         />
       )}
 
-      {/* Sidebar */}
       <aside
+        style={{ background: "var(--sidebar-bg)", borderRight: "1px solid var(--sidebar-border)", width: 240 }}
         className={`
-          fixed md:static inset-y-0 left-0 z-50
-          w-64 bg-gray-900 text-white flex flex-col
+          fixed md:static inset-y-0 left-0 z-50 flex flex-col shrink-0
           transform transition-transform duration-200 ease-in-out
           ${isOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}
         `}
       >
-        {/* Header */}
-        <div className="p-3 border-b border-gray-700 shrink-0">
+        {/* Brand */}
+        <div
+          style={{ borderBottom: "1px solid var(--sidebar-border)", padding: "16px 16px 14px" }}
+          className="shrink-0"
+        >
+          <div className="flex items-center gap-2.5 mb-3">
+            <div
+              style={{
+                width: 28, height: 28,
+                background: "var(--accent)",
+                borderRadius: 6,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                flexShrink: 0,
+              }}
+            >
+              <span style={{ color: "#fff", fontWeight: 700, fontSize: 13, fontFamily: "var(--mono)" }}>M</span>
+            </div>
+            <div>
+              <div style={{ color: "#fff", fontWeight: 600, fontSize: 13, lineHeight: 1.2 }}>MRO 助手</div>
+              <div style={{ color: "var(--text-muted)", fontSize: 11, marginTop: 1 }}>工业品智能采购</div>
+            </div>
+          </div>
+
           <button
             onClick={onNewChat}
-            className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg border border-gray-600 hover:bg-gray-700 transition-colors text-sm"
+            style={{
+              width: "100%",
+              display: "flex", alignItems: "center", gap: 6,
+              padding: "7px 12px",
+              border: "1px solid #2a2f42",
+              borderRadius: 6,
+              background: "transparent",
+              color: "#9aa3b8",
+              fontSize: 13,
+              cursor: "pointer",
+              transition: "all 0.15s",
+            }}
+            onMouseEnter={e => {
+              (e.currentTarget as HTMLButtonElement).style.background = "var(--sidebar-hover)";
+              (e.currentTarget as HTMLButtonElement).style.color = "#fff";
+            }}
+            onMouseLeave={e => {
+              (e.currentTarget as HTMLButtonElement).style.background = "transparent";
+              (e.currentTarget as HTMLButtonElement).style.color = "#9aa3b8";
+            }}
           >
-            <svg
-              className="w-4 h-4"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M12 4v16m8-8H4"
-              />
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+              <path d="M12 5v14M5 12h14" />
             </svg>
-            新建聊天
+            新建对话
           </button>
         </div>
 
-        {/* Chat list */}
-        <div className="flex-1 overflow-y-auto py-2">
-          {sorted.map((session) => (
-            <div
-              key={session.id}
-              onClick={() => {
-                onSelectChat(session.id);
-                onClose();
-              }}
-              className={`
-                group flex items-center gap-2 mx-2 px-3 py-2.5 rounded-lg cursor-pointer text-sm
-                ${
-                  session.id === activeId
-                    ? "bg-gray-700 text-white"
-                    : "text-gray-300 hover:bg-gray-800"
-                }
-              `}
-            >
-              <svg
-                className="w-4 h-4 shrink-0 text-gray-500"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"
-                />
-              </svg>
-              <div className="flex-1 min-w-0">
-                <div className="truncate">{session.title}</div>
-                <div className="text-xs text-gray-500">
-                  {formatRelativeTime(session.createdAt)}
-                </div>
-              </div>
-              {pendingDeleteId === session.id ? (
-                <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
-                  <button
-                    onClick={() => {
-                      onDeleteChat(session.id);
-                      setPendingDeleteId(null);
-                    }}
-                    className="p-1 text-red-400 hover:text-red-300 transition-colors"
-                    title="确认删除"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                    </svg>
-                  </button>
-                  <button
-                    onClick={() => setPendingDeleteId(null)}
-                    className="p-1 text-gray-400 hover:text-gray-200 transition-colors"
-                    title="取消"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
-                </div>
-              ) : (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setPendingDeleteId(session.id);
-                  }}
-                  className="opacity-0 group-hover:opacity-100 p-1 hover:text-red-400 transition-opacity shrink-0"
-                  title="删除聊天"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                  </svg>
-                </button>
-              )}
-            </div>
-          ))}
+        {/* Session list */}
+        <div className="flex-1 overflow-y-auto" style={{ padding: "8px 8px" }}>
           {sorted.length === 0 && (
-            <div className="px-4 py-8 text-center text-gray-500 text-sm">
-              暂无聊天记录
+            <div style={{ color: "var(--text-muted)", fontSize: 12, textAlign: "center", padding: "24px 0" }}>
+              暂无对话记录
             </div>
           )}
+          {sorted.map((session) => {
+            const isActive = session.id === activeId;
+            return (
+              <div
+                key={session.id}
+                onClick={() => { onSelectChat(session.id); onClose(); }}
+                style={{
+                  display: "flex", alignItems: "center", gap: 8,
+                  padding: "8px 10px",
+                  borderRadius: 6,
+                  cursor: "pointer",
+                  marginBottom: 2,
+                  borderLeft: isActive ? "2px solid var(--accent)" : "2px solid transparent",
+                  background: isActive ? "var(--sidebar-active)" : "transparent",
+                  transition: "all 0.12s",
+                }}
+                className="group"
+                onMouseEnter={e => {
+                  if (!isActive) (e.currentTarget as HTMLDivElement).style.background = "var(--sidebar-hover)";
+                }}
+                onMouseLeave={e => {
+                  if (!isActive) (e.currentTarget as HTMLDivElement).style.background = "transparent";
+                }}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={isActive ? "var(--accent)" : "#4a5068"} strokeWidth="1.8" style={{ flexShrink: 0, marginTop: 1 }}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+                </svg>
+
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{
+                    color: isActive ? "#fff" : "#8890a4",
+                    fontSize: 12.5,
+                    fontWeight: isActive ? 500 : 400,
+                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                  }}>
+                    {session.title}
+                  </div>
+                  <div style={{ color: "#4a5068", fontSize: 11, marginTop: 1 }}>
+                    {formatRelativeTime(session.createdAt)}
+                  </div>
+                </div>
+
+                {pendingDeleteId === session.id ? (
+                  <div
+                    style={{ display: "flex", gap: 2, flexShrink: 0 }}
+                    onClick={e => e.stopPropagation()}
+                  >
+                    <button
+                      onClick={() => { onDeleteChat(session.id); setPendingDeleteId(null); }}
+                      style={{ background: "none", border: "none", color: "#f87171", cursor: "pointer", padding: 3, borderRadius: 3 }}
+                      title="确认删除"
+                    >
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                        <path d="M5 13l4 4L19 7" />
+                      </svg>
+                    </button>
+                    <button
+                      onClick={() => setPendingDeleteId(null)}
+                      style={{ background: "none", border: "none", color: "#6b7280", cursor: "pointer", padding: 3, borderRadius: 3 }}
+                      title="取消"
+                    >
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                        <path d="M18 6L6 18M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={e => { e.stopPropagation(); setPendingDeleteId(session.id); }}
+                    style={{
+                      background: "none", border: "none", color: "#4a5068", cursor: "pointer",
+                      padding: 3, borderRadius: 3, flexShrink: 0,
+                      opacity: 0, transition: "opacity 0.12s",
+                    }}
+                    className="group-hover:opacity-100"
+                    title="删除对话"
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                  </button>
+                )}
+              </div>
+            );
+          })}
         </div>
 
         {/* Footer */}
-        <div className="p-3 border-t border-gray-700 shrink-0">
-          <div className="flex items-center gap-2 px-2 text-xs text-gray-500">
-            <div className="w-6 h-6 bg-blue-600 rounded flex items-center justify-center shrink-0">
-              <span className="text-white font-bold text-xs">M</span>
-            </div>
-            MRO 紧固件助手
+        <div style={{ borderTop: "1px solid var(--sidebar-border)", padding: "12px 16px" }} className="shrink-0">
+          <div style={{ color: "#3a3f52", fontSize: 11, display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ fontFamily: "var(--mono)" }}>v1.0</span>
+            <span style={{ color: "#2a2f40" }}>·</span>
+            <span>200万+ SKU</span>
           </div>
         </div>
       </aside>
