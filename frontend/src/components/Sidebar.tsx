@@ -180,9 +180,8 @@ export default function Sidebar({
                     style={{
                       background: "none", border: "none", color: "#4a5068", cursor: "pointer",
                       padding: 3, borderRadius: 3, flexShrink: 0,
-                      opacity: 0, transition: "opacity 0.12s",
                     }}
-                    className="group-hover:opacity-100"
+                    className="opacity-0 group-hover:opacity-100 transition-opacity duration-150"
                     title="删除对话"
                   >
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
