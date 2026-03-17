@@ -1,6 +1,12 @@
+import logging
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
 from app.routers.chat import router as chat_router
+from app.services.memory_service import memory_service
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="MRO AI Agent", version="1.0.0")
 
@@ -15,6 +21,20 @@ app.add_middleware(
 app.include_router(chat_router, prefix="/api")
 
 
+@app.on_event("startup")
+async def startup():
+    if await memory_service.is_healthy():
+        logger.info("Memos memory service: reachable")
+        try:
+            await memory_service._get_token()
+            logger.info("Memos memory service: authenticated OK")
+        except Exception as e:
+            logger.warning(f"Memos memory service: auth failed — {e}")
+    else:
+        logger.warning("Memos memory service: unreachable (memory features disabled)")
+
+
 @app.get("/health")
 async def health():
-    return {"status": "ok"}
+    memos_ok = await memory_service.is_healthy()
+    return {"status": "ok", "memory": "ok" if memos_ok else "unavailable"}

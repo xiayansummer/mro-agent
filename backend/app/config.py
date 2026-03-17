@@ -15,6 +15,11 @@ class Settings:
     AI_BASE_URL: str = os.getenv("AI_BASE_URL", "")
     AI_MODEL: str = os.getenv("AI_MODEL", "qwen-plus")
 
+    MEMOS_URL: str = os.getenv("MEMOS_URL", "http://localhost:5230")
+    MEMOS_ACCESS_TOKEN: str = os.getenv("MEMOS_ACCESS_TOKEN", "")
+    MEMOS_USERNAME: str = os.getenv("MEMOS_USERNAME", "mro-admin")
+    MEMOS_PASSWORD: str = os.getenv("MEMOS_PASSWORD", "mro-memory-2026")
+
     @property
     def database_url(self) -> str:
         return (

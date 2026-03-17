@@ -30,6 +30,7 @@ def get_session_context(session_id: str) -> dict:
 async def handle_message(
     session_id: str,
     user_message: str,
+    user_id: str = "",
 ) -> AsyncGenerator[str, None]:
     """Main agent orchestration: parse intent → search → generate response via SSE."""
     ctx = get_session_context(session_id)
