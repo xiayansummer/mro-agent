@@ -71,7 +71,11 @@ SYSTEM_PROMPT = """你是一个资深的MRO（工业品）采购专家。你的�
 6. need_clarification 绝大多数时候应该是 false。"""
 
 
-async def parse_intent(user_message: str, conversation_context: list[dict] | None = None) -> dict:
+async def parse_intent(
+    user_message: str,
+    conversation_context: list[dict] | None = None,
+    memory_context: str = "",
+) -> dict:
     messages = []
 
     if conversation_context:
@@ -79,10 +83,19 @@ async def parse_intent(user_message: str, conversation_context: list[dict] | Non
 
     messages.append({"role": "user", "content": user_message})
 
+    # Inject memory context into system prompt when available
+    system_prompt = SYSTEM_PROMPT
+    if memory_context:
+        system_prompt = (
+            SYSTEM_PROMPT
+            + f"\n\n## 用户历史采购偏好\n\n{memory_context}\n\n"
+            "请参考以上历史记录，更准确地理解用户当前需求（如偏好品牌、常用规格、行业背景等）。"
+        )
+
     response = client.chat.completions.create(
         model=settings.AI_MODEL,
         max_tokens=1024,
-        messages=[{"role": "system", "content": SYSTEM_PROMPT}] + messages,
+        messages=[{"role": "system", "content": system_prompt}] + messages,
     )
 
     text = response.choices[0].message.content.strip()

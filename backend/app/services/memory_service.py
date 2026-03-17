@@ -121,9 +121,9 @@ class MemoryService:
         """
         try:
             headers = await self._auth_headers()
-            filter_expr = f'tag = "{uid_tag}"'
+            filter_expr = f'"{uid_tag}" in tags'
             if extra_tag:
-                filter_expr += f' && tag = "{extra_tag}"'
+                filter_expr += f' && "{extra_tag}" in tags'
 
             async with self._make_client() as client:
                 resp = await client.get(

@@ -40,9 +40,18 @@ async def handle_message(
     # Build conversation context for Claude (keep last 6 turns)
     conv_messages = ctx["conversation"][-6:]
 
-    # Step 1: Parse intent
+    # Step 1: Parse intent (with memory context if available)
+    effective_user_id = user_id or session_id
+    memory_context = ""
     try:
-        parsed = await parse_intent(user_message, conv_messages)
+        memory_context = await memory_service.get_user_context(effective_user_id, limit=3)
+        if memory_context:
+            logger.info(f"Memory context loaded for user {effective_user_id[:8]}")
+    except Exception as e:
+        logger.warning(f"Memory retrieval failed (non-fatal): {e}")
+
+    try:
+        parsed = await parse_intent(user_message, conv_messages, memory_context)
         logger.info(f"Parsed intent: {json.dumps(parsed, ensure_ascii=False)}")
     except Exception as e:
         logger.error(f"Intent parsing failed: {e}")
@@ -108,7 +117,6 @@ async def handle_message(
     ctx["conversation"].append({"role": "assistant", "content": "".join(text_parts)})
 
     # Step 5: Save memory before yielding done (runs concurrently, non-blocking)
-    effective_user_id = user_id or session_id
     logger.info(f"Scheduling memory save for user={effective_user_id[:8]}")
     asyncio.ensure_future(
         memory_service.save_session_summary(
