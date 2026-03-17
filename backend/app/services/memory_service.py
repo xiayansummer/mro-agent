@@ -197,11 +197,15 @@ class MemoryService:
 
 #{uid_tag} #session #{category_tag}"""
 
-        result = await self.create_memo(content)
-        if result:
-            logger.info(f"Memos: saved session summary for user {user_id[:8]}")
-        else:
-            logger.warning(f"Memos: failed to save session summary for user {user_id[:8]}")
+        logger.info(f"Memos: saving session summary for user {user_id[:8]}, mode={response_mode}")
+        try:
+            result = await self.create_memo(content)
+            if result:
+                logger.info(f"Memos: saved OK — memo name={result.get('name')}")
+            else:
+                logger.warning(f"Memos: create_memo returned None for user {user_id[:8]}")
+        except Exception as e:
+            logger.error(f"Memos: save_session_summary exception: {e}", exc_info=True)
 
     # ── Public: High-level read ────────────────────────────────────────────
 

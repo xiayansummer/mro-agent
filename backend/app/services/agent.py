@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 from collections.abc import AsyncGenerator
@@ -10,6 +11,7 @@ from app.services.response_gen import (
     generate_clarification_stream,
     generate_no_results_stream,
 )
+from app.services.memory_service import memory_service
 
 logger = logging.getLogger(__name__)
 
@@ -70,8 +72,10 @@ async def handle_message(
 
     # Step 4: Generate response
     text_parts = []
+    response_mode = "unknown"
 
     if results and need_clarification:
+        response_mode = "broad"
         question = parsed.get("clarification_question", "能否提供更多细节？")
         async for chunk in generate_broad_response_stream(
             user_message, results, question, conv_messages
@@ -80,11 +84,13 @@ async def handle_message(
             text_parts.append(chunk)
 
     elif results:
+        response_mode = "precise"
         async for chunk in generate_response_stream(user_message, results, conv_messages):
             yield f"event: text\ndata: {json.dumps(chunk, ensure_ascii=False)}\n\n"
             text_parts.append(chunk)
 
     elif need_clarification:
+        response_mode = "clarification"
         question = parsed.get("clarification_question", "能否提供更多细节？")
         async for chunk in generate_clarification_stream(
             user_message, question, conv_messages
@@ -93,11 +99,25 @@ async def handle_message(
             text_parts.append(chunk)
 
     else:
+        response_mode = "no_results"
         async for chunk in generate_no_results_stream(user_message, parsed):
             yield f"event: text\ndata: {json.dumps(chunk, ensure_ascii=False)}\n\n"
             text_parts.append(chunk)
 
     ctx["conversation"].append({"role": "user", "content": user_message})
     ctx["conversation"].append({"role": "assistant", "content": "".join(text_parts)})
+
+    # Step 5: Save memory before yielding done (runs concurrently, non-blocking)
+    effective_user_id = user_id or session_id
+    logger.info(f"Scheduling memory save for user={effective_user_id[:8]}")
+    asyncio.ensure_future(
+        memory_service.save_session_summary(
+            user_id=effective_user_id,
+            user_message=user_message,
+            intent=parsed,
+            results=results,
+            response_mode=response_mode,
+        )
+    )
 
     yield "event: done\ndata: \n\n"
