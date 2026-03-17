@@ -4,20 +4,13 @@ from app.config import settings
 
 client = OpenAI(api_key=settings.AI_API_KEY, base_url=settings.AI_BASE_URL)
 
-SYSTEM_PROMPT = """你是一个专业的MRO工业品推荐顾问。根据用户需求和搜索到的SKU结果，为用户提供专业的产品推荐。
+SYSTEM_PROMPT = """你是一个专业的MRO工业品推荐顾问。根据用户需求和搜索到的SKU结果，简洁直接地推荐产品。
 
-你的职责：
-1. 从搜索结果中筛选最匹配用户需求的产品，按匹配度排序推荐
-2. 用简洁专业的语言解释推荐理由
-3. 指出各产品的关键差异（材质、规格、品牌等）
-4. 如果搜索结果不太匹配用户需求，诚实告知并建议调整搜索条件
-
-回复格式要求：
-- 先用1-2句话概述搜索结果
-- 然后列出推荐的产品（最多推荐5个最匹配的），每个产品说明推荐理由
-- 最后给出选购建议或追问
-
-注意：不要编造不存在的产品信息，只基于提供的搜索结果进行推荐。"""
+要求：
+- 直接列出最匹配的产品（最多5个），说明关键规格差异和推荐理由
+- 如果搜索结果与用户需求有偏差，诚实说明
+- 回复简洁，不要冗长开场白
+- 不要编造不存在的产品信息"""
 
 
 async def generate_response_stream(
@@ -137,20 +130,58 @@ async def generate_clarification_stream(
 async def generate_no_results_stream(
     user_message: str,
     parsed_intent: dict,
+    alternatives: list[dict] | None = None,
 ) -> AsyncGenerator[str, None]:
-    intent_desc = f"分类: {parsed_intent.get('l2_category', '未知')}/{parsed_intent.get('l3_category', '未知')}, 关键词: {parsed_intent.get('keywords', [])}"
+    # Build parsed params summary
+    keywords = parsed_intent.get("keywords") or []
+    spec_keywords = parsed_intent.get("spec_keywords") or []
+    brand = parsed_intent.get("brand") or ""
+    l2 = parsed_intent.get("l2_category") or ""
+    l3 = parsed_intent.get("l3_category") or ""
+
+    params_parts = []
+    if l2 or l3:
+        params_parts.append(f"品类: {'/'.join(p for p in [l2, l3] if p)}")
+    if keywords:
+        params_parts.append(f"产品: {', '.join(keywords)}")
+    if spec_keywords:
+        params_parts.append(f"规格: {', '.join(spec_keywords)}")
+    if brand:
+        params_parts.append(f"品牌: {brand}")
+    params_desc = "；".join(params_parts) if params_parts else "未能识别具体需求"
+
+    if alternatives:
+        alt_text = format_skus_for_prompt(alternatives)
+        prompt = f"""用户搜索："{user_message}"
+
+解析参数：{params_desc}
+
+库中暂无完全匹配该规格的产品。以下是相近品类的产品，供参考选型：
+
+{alt_text}
+
+请：
+1. 简要说明未能精确匹配的原因（规格不在库中、标准差异等）
+2. 基于以上近似产品推荐1-3个最接近的选项，说明与用户需求的差异
+3. 如有必要，建议用户提供替代规格或标准"""
+    else:
+        prompt = f"""用户搜索："{user_message}"
+
+解析参数：{params_desc}
+
+库中暂无匹配产品。请：
+1. 简要列出以上解析参数，确认理解是否正确
+2. 建议用户尝试相近规格或标准（如 M8×25 或 M8×35 替代 M8×30，DIN933 替代 DIN931 等）
+3. 邀请用户提供更多信息"""
 
     messages = [
-        {"role": "system", "content": "你是一个专业友好的MRO工业品顾问。"},
-        {
-            "role": "user",
-            "content": f'用户搜索 "{user_message}"，解析为 {intent_desc}，但没有找到匹配的产品。请友好地告知用户并建议调整搜索条件。简洁回复。',
-        },
+        {"role": "system", "content": "你是一个专业的MRO工业品顾问，擅长紧固件选型。回复简洁专业。"},
+        {"role": "user", "content": prompt},
     ]
 
     stream = client.chat.completions.create(
         model=settings.AI_MODEL,
-        max_tokens=512,
+        max_tokens=600,
         messages=messages,
         stream=True,
     )

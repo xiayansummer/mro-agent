@@ -4,7 +4,7 @@ import logging
 from collections.abc import AsyncGenerator
 from app.db.mysql import AsyncSessionLocal
 from app.services.intent_parser import parse_intent
-from app.services.sku_search import search_skus, relaxed_search, attach_files
+from app.services.sku_search import search_skus, relaxed_search, attach_files, find_alternatives
 from app.services.response_gen import (
     generate_response_stream,
     generate_broad_response_stream,
@@ -109,12 +109,35 @@ async def handle_message(
 
     else:
         response_mode = "no_results"
-        async for chunk in generate_no_results_stream(user_message, parsed):
+        # Find similar products to show as alternatives
+        async with AsyncSessionLocal() as db_session:
+            alternatives = await find_alternatives(db_session, parsed, limit=10)
+            alternatives = await attach_files(db_session, alternatives)
+
+        if alternatives:
+            alt_data = json.dumps(alternatives, ensure_ascii=False, default=str)
+            yield f"event: sku_results\ndata: {alt_data}\n\n"
+
+        async for chunk in generate_no_results_stream(user_message, parsed, alternatives):
             yield f"event: text\ndata: {json.dumps(chunk, ensure_ascii=False)}\n\n"
             text_parts.append(chunk)
 
+    # Store compact search summary for continuity (cleaner than full prose for intent parsing)
+    kws = parsed.get("keywords") or []
+    specs = parsed.get("spec_keywords") or []
+    brand = parsed.get("brand") or ""
+    search_summary = f"[已搜索: {' '.join(kws)}"
+    if specs:
+        search_summary += f" 规格:{' '.join(specs)}"
+    if brand:
+        search_summary += f" 品牌:{brand}"
+    search_summary += f", 找到{len(results)}个产品]"
+    if results:
+        top_names = "、".join(r["item_name"][:15] for r in results[:3])
+        search_summary += f" 代表: {top_names}"
+
     ctx["conversation"].append({"role": "user", "content": user_message})
-    ctx["conversation"].append({"role": "assistant", "content": "".join(text_parts)})
+    ctx["conversation"].append({"role": "assistant", "content": search_summary})
 
     # Step 5: Save memory before yielding done (runs concurrently, non-blocking)
     logger.info(f"Scheduling memory save for user={effective_user_id[:8]}")

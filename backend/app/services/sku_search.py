@@ -148,3 +148,26 @@ async def relaxed_search(session: AsyncSession, parsed_intent: dict, limit: int 
             return results
 
     return []
+
+
+async def find_alternatives(session: AsyncSession, parsed_intent: dict, limit: int = 10) -> list[dict]:
+    """
+    Find similar products when exact match fails.
+    Ignores spec_keywords and brand — searches only by product type + category.
+    """
+    keywords = parsed_intent.get("keywords", [])
+    l3 = parsed_intent.get("l3_category")
+    l2 = parsed_intent.get("l2_category")
+
+    for attempt in [
+        {"l3_category": l3, "keywords": keywords[:1]} if l3 else None,
+        {"l2_category": l2, "keywords": keywords[:1]} if l2 else None,
+        {"keywords": keywords[:1]} if keywords else None,
+    ]:
+        if not attempt:
+            continue
+        results = await search_skus(session, attempt, limit)
+        if results:
+            return results
+
+    return []
