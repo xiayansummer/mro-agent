@@ -33,6 +33,7 @@ async def handle_message(
     session_id: str,
     user_message: str,
     user_id: str = "",
+    image_base64: str = "",
 ) -> AsyncGenerator[str, None]:
     """Main agent orchestration: parse intent → search → generate response via SSE."""
     ctx = get_session_context(session_id)
@@ -51,7 +52,7 @@ async def handle_message(
         logger.warning(f"Memory retrieval failed (non-fatal): {e}")
 
     try:
-        parsed = await parse_intent(user_message, conv_messages, memory_context)
+        parsed = await parse_intent(user_message, conv_messages, memory_context, image_base64)
         logger.info(f"Parsed intent: {json.dumps(parsed, ensure_ascii=False)}")
     except Exception as e:
         logger.error(f"Intent parsing failed: {e}")

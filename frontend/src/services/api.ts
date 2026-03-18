@@ -14,12 +14,16 @@ export async function sendMessage(
   sessionId: string,
   message: string,
   callbacks: SSECallbacks,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  imageBase64?: string,
 ): Promise<void> {
+  const body: Record<string, string> = { session_id: sessionId, message };
+  if (imageBase64) body.image_base64 = imageBase64;
+
   const response = await fetch(`${API_BASE}/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ session_id: sessionId, message }),
+    body: JSON.stringify(body),
     signal,
   });
 

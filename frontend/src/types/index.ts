@@ -22,6 +22,7 @@ export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
+  imageUrl?: string;     // Data URL for display in user bubble
   skuResults?: SkuItem[];
   isStreaming?: boolean;
 }

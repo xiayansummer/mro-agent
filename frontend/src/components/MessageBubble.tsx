@@ -39,10 +39,25 @@ export default function MessageBubble({ message, isFirst }: Props) {
           padding: "10px 14px",
           fontSize: 14,
           lineHeight: 1.7,
-          whiteSpace: "pre-wrap",
           wordBreak: "break-word",
         }}>
-          {message.content}
+          {message.imageUrl && (
+            <img
+              src={message.imageUrl}
+              alt="上传图片"
+              style={{
+                display: "block",
+                maxWidth: "100%",
+                maxHeight: 200,
+                borderRadius: 6,
+                marginBottom: message.content ? 8 : 0,
+                objectFit: "contain",
+              }}
+            />
+          )}
+          {message.content && (
+            <span style={{ whiteSpace: "pre-wrap" }}>{message.content}</span>
+          )}
         </div>
       </div>
     );

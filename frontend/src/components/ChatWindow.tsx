@@ -56,8 +56,8 @@ export default function ChatWindow({ sessionId, messages, onMessagesChange, onTo
 
   const handleStop = useCallback(() => { abortRef.current?.abort(); }, []);
 
-  const handleSend = async (text: string) => {
-    const userMsg: ChatMessage = { id: generateId(), role: "user", content: text };
+  const handleSend = async (text: string, imageBase64?: string, imageUrl?: string) => {
+    const userMsg: ChatMessage = { id: generateId(), role: "user", content: text, imageUrl };
     const assistantMsgId = generateId();
     const assistantMsg: ChatMessage = { id: assistantMsgId, role: "assistant", content: "", isStreaming: true };
 
@@ -99,7 +99,7 @@ export default function ChatWindow({ sessionId, messages, onMessagesChange, onTo
           updateMessages(next);
           setIsLoading(false);
         },
-      }, abortController.signal);
+      }, abortController.signal, imageBase64);
     } catch (err: unknown) {
       if (err instanceof DOMException && err.name === "AbortError") {
         const next = messagesRef.current.map((m) =>
@@ -213,7 +213,7 @@ export default function ChatWindow({ sessionId, messages, onMessagesChange, onTo
         )}
       </div>
 
-      <ChatInput onSend={handleSend} onStop={handleStop} disabled={isLoading} isLoading={isLoading} />
+      <ChatInput onSend={handleSend} onStop={handleStop} disabled={isLoading} isLoading={isLoading}  />
     </div>
   );
 }

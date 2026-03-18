@@ -14,6 +14,7 @@ class Settings:
     AI_API_KEY: str = os.getenv("AI_API_KEY", "")
     AI_BASE_URL: str = os.getenv("AI_BASE_URL", "")
     AI_MODEL: str = os.getenv("AI_MODEL", "qwen-plus")
+    AI_VISION_MODEL: str = os.getenv("AI_VISION_MODEL", "qwen-vl-plus")
 
     MEMOS_URL: str = os.getenv("MEMOS_URL", "http://localhost:5230")
     MEMOS_ACCESS_TOKEN: str = os.getenv("MEMOS_ACCESS_TOKEN", "")

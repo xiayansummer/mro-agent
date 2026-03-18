@@ -11,15 +11,15 @@ router = APIRouter()
 class ChatRequest(BaseModel):
     session_id: str
     message: str
-    user_id: Optional[str] = None  # Stable cross-session identifier for memory
+    user_id: Optional[str] = None
+    image_base64: Optional[str] = None  # Base64-encoded image for vision queries
 
 
 @router.post("/chat")
 async def chat(req: ChatRequest):
-    # Fall back to session_id as user_id until frontend sends it
     user_id = req.user_id or req.session_id
     return StreamingResponse(
-        handle_message(req.session_id, req.message, user_id),
+        handle_message(req.session_id, req.message, user_id, req.image_base64 or ""),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
