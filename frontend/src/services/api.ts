@@ -1,5 +1,30 @@
 import { SkuItem } from "../types";
 
+export async function submitFeedback(
+  sessionId: string,
+  action: "liked" | "disliked",
+  sku: SkuItem,
+): Promise<void> {
+  try {
+    await fetch(`${API_BASE}/feedback`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        session_id: sessionId,
+        action,
+        item_code: sku.item_code,
+        item_name: sku.item_name,
+        brand_name: sku.brand_name ?? "",
+        l2_category: sku.l2_category_name ?? "",
+        l3_category: sku.l3_category_name ?? "",
+        specification: sku.specification ?? "",
+      }),
+    });
+  } catch {
+    // fire-and-forget, silent fail
+  }
+}
+
 const API_BASE = "/api";
 
 export interface SSECallbacks {

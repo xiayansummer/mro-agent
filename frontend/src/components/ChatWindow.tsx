@@ -185,7 +185,7 @@ export default function ChatWindow({ sessionId, messages, onMessagesChange, onTo
       >
         <div style={{ maxWidth: 780, margin: "0 auto" }}>
           {displayMessages.map((msg, i) => (
-            <MessageBubble key={msg.id} message={msg} isFirst={i === 0} />
+            <MessageBubble key={msg.id} message={msg} isFirst={i === 0} sessionId={sessionId} />
           ))}
           <div ref={bottomRef} />
         </div>

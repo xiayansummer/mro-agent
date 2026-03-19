@@ -1,8 +1,11 @@
+import { useState } from "react";
 import { SkuItem } from "../types";
+import { submitFeedback } from "../services/api";
 
 interface Props {
   sku: SkuItem;
   index: number;
+  sessionId?: string;
 }
 
 const FILE_STYLE: Record<string, { bg: string; color: string }> = {
@@ -26,7 +29,8 @@ function parseAttributes(details: string | null): { key: string; value: string }
     .filter((x): x is { key: string; value: string } => x !== null);
 }
 
-export default function SkuCard({ sku, index }: Props) {
+export default function SkuCard({ sku, index, sessionId }: Props) {
+  const [vote, setVote] = useState<"liked" | "disliked" | null>(null);
   const attributes = parseAttributes(sku.attribute_details);
   const category = [sku.l2_category_name, sku.l3_category_name, sku.l4_category_name]
     .filter(Boolean)
@@ -206,6 +210,71 @@ export default function SkuCard({ sku, index }: Props) {
           })}
         </div>
       )}
+
+      {/* Feedback */}
+      <div style={{
+        marginTop: 8, paddingTop: 8,
+        borderTop: "1px solid var(--border)",
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+      }}>
+        <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+          {vote === "liked" ? "已标记感兴趣" : vote === "disliked" ? "已标记不符合" : "这个结果有帮助吗？"}
+        </span>
+        <div style={{ display: "flex", gap: 4 }}>
+          {(["liked", "disliked"] as const).map((action) => {
+            const isActive = vote === action;
+            const isLike = action === "liked";
+            return (
+              <button
+                key={action}
+                disabled={vote !== null}
+                onClick={() => {
+                  setVote(action);
+                  if (sessionId) submitFeedback(sessionId, action, sku);
+                }}
+                title={isLike ? "有帮助" : "不符合需求"}
+                style={{
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  width: 26, height: 26,
+                  background: isActive ? (isLike ? "#dcfce7" : "#fee2e2") : "transparent",
+                  border: `1px solid ${isActive ? (isLike ? "#86efac" : "#fca5a5") : "var(--border)"}`,
+                  borderRadius: 5,
+                  cursor: vote !== null ? "default" : "pointer",
+                  transition: "all 0.15s",
+                  color: isActive ? (isLike ? "#16a34a" : "#dc2626") : "var(--text-muted)",
+                  padding: 0,
+                }}
+                onMouseEnter={e => {
+                  if (vote !== null) return;
+                  const btn = e.currentTarget;
+                  btn.style.background = isLike ? "#dcfce7" : "#fee2e2";
+                  btn.style.borderColor = isLike ? "#86efac" : "#fca5a5";
+                  btn.style.color = isLike ? "#16a34a" : "#dc2626";
+                }}
+                onMouseLeave={e => {
+                  if (vote !== null) return;
+                  const btn = e.currentTarget;
+                  btn.style.background = "transparent";
+                  btn.style.borderColor = "var(--border)";
+                  btn.style.color = "var(--text-muted)";
+                }}
+              >
+                {isLike ? (
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill={isActive ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                    <path d="M14 9V5a3 3 0 00-3-3l-4 9v11h11.28a2 2 0 002-1.7l1.38-9a2 2 0 00-2-2.3H14z" />
+                    <path d="M7 22H4a2 2 0 01-2-2v-7a2 2 0 012-2h3" />
+                  </svg>
+                ) : (
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill={isActive ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                    <path d="M10 15v4a3 3 0 003 3l4-9V2H5.72a2 2 0 00-2 1.7l-1.38 9a2 2 0 002 2.3H10z" />
+                    <path d="M17 2h2.67A2.31 2.31 0 0122 4v7a2.31 2.31 0 01-2.33 2H17" />
+                  </svg>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }

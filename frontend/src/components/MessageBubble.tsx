@@ -7,9 +7,10 @@ import SkuCard from "./SkuCard";
 interface Props {
   message: ChatMessage;
   isFirst?: boolean;
+  sessionId?: string;
 }
 
-export default function MessageBubble({ message, isFirst }: Props) {
+export default function MessageBubble({ message, isFirst, sessionId }: Props) {
   const isUser = message.role === "user";
   const [copied, setCopied] = useState(false);
 
@@ -109,7 +110,7 @@ export default function MessageBubble({ message, isFirst }: Props) {
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 8 }}>
               {message.skuResults.map((sku, i) => (
-                <SkuCard key={sku.item_code} sku={sku} index={i} />
+                <SkuCard key={sku.item_code} sku={sku} index={i} sessionId={sessionId} />
               ))}
             </div>
           </div>
