@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { ChatSession, ChatMessage } from "./types";
 import ChatWindow from "./components/ChatWindow";
 import Sidebar from "./components/Sidebar";
+import InquiryPage from "./components/InquiryPage";
 
 const STORAGE_KEY = "mro-chat-sessions";
 const MAX_SESSIONS = 50;
@@ -67,6 +68,7 @@ export default function App() {
     () => sessions[0]?.id ?? ""
   );
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [activeView, setActiveView] = useState<"chat" | "inquiry">("chat");
 
   // Debounced localStorage persistence
   const saveTimerRef = useRef<ReturnType<typeof setTimeout>>();
@@ -155,12 +157,16 @@ export default function App() {
         sessions={sessions}
         activeId={activeId}
         isOpen={sidebarOpen}
+        activeView={activeView}
         onNewChat={handleNewChat}
-        onSelectChat={handleSelectChat}
+        onSelectChat={(id) => { handleSelectChat(id); setActiveView("chat"); }}
         onDeleteChat={handleDeleteChat}
         onClose={handleCloseSidebar}
+        onNavigate={setActiveView}
       />
-      {activeSession && (
+      {activeView === "inquiry" ? (
+        <InquiryPage onToggleSidebar={handleToggleSidebar} />
+      ) : activeSession && (
         <ChatWindow
           key={activeSession.id}
           sessionId={activeSession.id}

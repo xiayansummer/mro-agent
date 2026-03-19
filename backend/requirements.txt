@@ -7,3 +7,6 @@ openai==1.58.1
 pydantic==2.10.4
 sse-starlette==2.2.1
 httpx==0.28.1
+openpyxl==3.1.5
+xlrd==2.0.1
+python-multipart==0.0.20

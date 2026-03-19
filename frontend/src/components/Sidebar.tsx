@@ -5,10 +5,12 @@ interface Props {
   sessions: ChatSession[];
   activeId: string;
   isOpen: boolean;
+  activeView: "chat" | "inquiry";
   onNewChat: () => void;
   onSelectChat: (id: string) => void;
   onDeleteChat: (id: string) => void;
   onClose: () => void;
+  onNavigate: (view: "chat" | "inquiry") => void;
 }
 
 function formatRelativeTime(timestamp: number): string {
@@ -25,7 +27,7 @@ function formatRelativeTime(timestamp: number): string {
 }
 
 export default function Sidebar({
-  sessions, activeId, isOpen, onNewChat, onSelectChat, onDeleteChat, onClose,
+  sessions, activeId, isOpen, activeView, onNewChat, onSelectChat, onDeleteChat, onClose, onNavigate,
 }: Props) {
   const sorted = [...sessions].sort((a, b) => b.createdAt - a.createdAt);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
@@ -99,6 +101,44 @@ export default function Sidebar({
             </svg>
             新建对话
           </button>
+        </div>
+
+        {/* Nav */}
+        <div style={{ padding: "8px 8px", borderBottom: "1px solid var(--sidebar-border)" }}>
+          {[
+            { view: "chat" as const, label: "智能对话", icon: <path strokeLinecap="round" strokeLinejoin="round" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" /> },
+            { view: "inquiry" as const, label: "批量询价", icon: <path strokeLinecap="round" strokeLinejoin="round" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /> },
+          ].map(({ view, label, icon }) => {
+            const active = activeView === view;
+            return (
+              <button
+                key={view}
+                onClick={() => { onNavigate(view); onClose(); }}
+                style={{
+                  width: "100%",
+                  display: "flex", alignItems: "center", gap: 8,
+                  padding: "7px 10px",
+                  borderRadius: 6,
+                  background: active ? "var(--sidebar-active)" : "transparent",
+                  border: "none",
+                  borderLeft: `2px solid ${active ? "var(--accent)" : "transparent"}`,
+                  color: active ? "#fff" : "#8890a4",
+                  fontSize: 13,
+                  cursor: "pointer",
+                  transition: "all 0.12s",
+                  marginBottom: 2,
+                  textAlign: "left",
+                }}
+                onMouseEnter={e => { if (!active) (e.currentTarget as HTMLButtonElement).style.background = "var(--sidebar-hover)"; }}
+                onMouseLeave={e => { if (!active) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={active ? "var(--accent)" : "#4a5068"} strokeWidth="1.8" style={{ flexShrink: 0 }}>
+                  {icon}
+                </svg>
+                {label}
+              </button>
+            );
+          })}
         </div>
 
         {/* Session list */}
