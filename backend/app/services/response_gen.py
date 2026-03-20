@@ -56,6 +56,7 @@ async def generate_response_stream(
         max_tokens=2048,
         messages=messages,
         stream=True,
+        extra_body={"enable_thinking": False},
     )
 
     for chunk in stream:
@@ -122,6 +123,7 @@ async def generate_broad_response_stream(
         max_tokens=2048,
         messages=messages,
         stream=True,
+        extra_body={"enable_thinking": False},
     )
 
     for chunk in stream:
@@ -154,6 +156,7 @@ async def generate_clarification_stream(
         max_tokens=512,
         messages=messages,
         stream=True,
+        extra_body={"enable_thinking": False},
     )
 
     for chunk in stream:
@@ -219,6 +222,7 @@ async def generate_no_results_stream(
         max_tokens=600,
         messages=messages,
         stream=True,
+        extra_body={"enable_thinking": False},
     )
 
     for chunk in stream:

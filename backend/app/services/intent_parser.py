@@ -406,6 +406,7 @@ async def parse_intent(
         model=model,
         max_tokens=1024,
         messages=[{"role": "system", "content": system_prompt}] + messages,
+        extra_body={"enable_thinking": False},
     )
 
     text = response.choices[0].message.content.strip()
