@@ -148,6 +148,7 @@ class MemoryService:
         intent: dict,
         results: list,
         response_mode: str,
+        query_type: str = "",
     ) -> None:
         """
         Called after each conversation turn to save a structured summary memo.
@@ -191,6 +192,7 @@ class MemoryService:
 **关键词：** {", ".join(keywords) if keywords else "无"}
 **规格要求：** {", ".join(spec_keywords) if spec_keywords else "无"}
 **品牌要求：** {brand or "无"}
+**查询类型：** {query_type or "unknown"}
 **匹配数量：** {len(results)} 个产品
 **响应类型：** {response_mode}
 
@@ -256,16 +258,27 @@ class MemoryService:
 
         # Fetch session history and feedback in parallel
         session_memos, feedback_memos = await asyncio.gather(
-            self.list_memos(uid_tag, extra_tag="session", limit=limit),
+            self.list_memos(uid_tag, extra_tag="session", limit=max(limit, 6)),
             self.list_memos(uid_tag, extra_tag="feedback", limit=15),
         )
 
         parts = []
 
+        # ── Expertise level from session history ────────────────────────
+        expertise_level = _compute_expertise(session_memos)
+        if expertise_level != "unknown":
+            level_label = {"expert": "专家", "intermediate": "中级", "novice": "新手"}.get(expertise_level, expertise_level)
+            level_hint = {
+                "expert": "用户有丰富采购经验，熟悉规格参数和标准编号，直接给出精准结果，无需过多引导。",
+                "intermediate": "用户有一定经验，了解品类，但有时需要确认规格细节。",
+                "novice": "用户是采购新手，需要引导式追问，解释产品类型区别，帮助逐步明确需求。",
+            }.get(expertise_level, "")
+            parts.append(f"【用户专业程度】级别：{level_label}（{expertise_level}）\n{level_hint}")
+
         # ── Session history ──────────────────────────────────────────────
         if session_memos:
             session_parts = []
-            for memo in session_memos:
+            for memo in session_memos[:limit]:
                 raw = memo.get("content", "")
                 lines = [ln for ln in raw.splitlines() if not ln.startswith("#uid-")]
                 text = "\n".join(lines).strip()
@@ -336,6 +349,59 @@ class MemoryService:
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────
+
+def _compute_expertise(session_memos: list[dict]) -> str:
+    """
+    Infer user expertise from recent session memos.
+    Returns: "expert" | "intermediate" | "novice" | "unknown"
+
+    Signals:
+      Expert:      query_type=precise, has spec_keywords, uses standard numbers
+      Novice:      query_type=application/vague, no spec_keywords, broad questions
+      Intermediate: mixed
+    """
+    if not session_memos:
+        return "unknown"
+
+    expert_score = 0
+    novice_score = 0
+
+    for memo in session_memos:
+        raw = memo.get("content", "")
+
+        # query_type signal
+        if "**查询类型：** precise" in raw:
+            expert_score += 2
+        elif "**查询类型：** broad_spec" in raw:
+            expert_score += 1
+        elif "**查询类型：** application" in raw:
+            novice_score += 1
+        elif "**查询类型：** vague" in raw:
+            novice_score += 2
+
+        # spec_keywords signal
+        for line in raw.splitlines():
+            if line.startswith("**规格要求：**"):
+                spec_val = line.replace("**规格要求：**", "").strip()
+                if spec_val and spec_val != "无":
+                    # Has real spec keywords (DIN, M8, ISO, etc.)
+                    expert_score += 1
+                else:
+                    novice_score += 1
+                break
+
+    total = expert_score + novice_score
+    if total < 2:
+        return "unknown"
+
+    ratio = expert_score / total
+    if ratio >= 0.7:
+        return "expert"
+    elif ratio >= 0.4:
+        return "intermediate"
+    else:
+        return "novice"
+
 
 def _uid_tag(user_id: str) -> str:
     """Derive a short, tag-safe string from a user_id UUID."""

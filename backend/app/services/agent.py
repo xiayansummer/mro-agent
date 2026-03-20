@@ -61,6 +61,8 @@ async def handle_message(
 
     ctx["last_intent"] = parsed
     need_clarification = parsed.get("need_clarification", False)
+    query_type = parsed.get("query_type", "")
+    inferred_need = parsed.get("inferred_need", "")
 
     # Step 2: Search SKUs (manage DB session ourselves to avoid leaks in SSE)
     yield f"event: thinking\ndata: 正在搜索产品...\n\n"
@@ -88,14 +90,18 @@ async def handle_message(
         response_mode = "broad"
         question = parsed.get("clarification_question", "能否提供更多细节？")
         async for chunk in generate_broad_response_stream(
-            user_message, results, question, conv_messages
+            user_message, results, question, conv_messages,
+            query_type=query_type, inferred_need=inferred_need, memory_context=memory_context,
         ):
             yield f"event: text\ndata: {json.dumps(chunk, ensure_ascii=False)}\n\n"
             text_parts.append(chunk)
 
     elif results:
         response_mode = "precise"
-        async for chunk in generate_response_stream(user_message, results, conv_messages):
+        async for chunk in generate_response_stream(
+            user_message, results, conv_messages,
+            query_type=query_type, inferred_need=inferred_need, memory_context=memory_context,
+        ):
             yield f"event: text\ndata: {json.dumps(chunk, ensure_ascii=False)}\n\n"
             text_parts.append(chunk)
 
@@ -149,6 +155,7 @@ async def handle_message(
             intent=parsed,
             results=results,
             response_mode=response_mode,
+            query_type=query_type,
         )
     )
 
