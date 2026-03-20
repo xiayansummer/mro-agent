@@ -57,17 +57,24 @@ async def search_skus(session: AsyncSession, parsed_intent: dict, limit: int = 2
             conditions.append(f"{col} LIKE :cat_{i}")
             params[f"cat_{i}"] = f"%{value}%"
 
-    # Keyword matching on item_name (product type keywords)
+    # Keyword matching on item_name — ANY keyword must match (OR), not all (AND).
+    # e.g. keywords=["六角头螺栓","螺栓"] → item_name contains "六角头螺栓" OR "螺栓"
+    # This prevents over-strict filtering when the LLM emits category-level phrases
+    # (like "六角头螺栓") that differ from actual DB item names ("外六角螺栓").
     keywords = parsed_intent.get("keywords", [])
-    for i, kw in enumerate(keywords):
-        conditions.append(f"item_name LIKE :kw_{i}")
-        params[f"kw_{i}"] = f"%{kw}%"
+    if keywords:
+        kw_clauses = [f"item_name LIKE :kw_{i}" for i in range(len(keywords))]
+        conditions.append(f"({' OR '.join(kw_clauses)})")
+        for i, kw in enumerate(keywords):
+            params[f"kw_{i}"] = f"%{kw}%"
 
-    # Spec keywords match across item_name, specification, and attribute_details
+    # Spec keywords match across item_name, specification, mfg_sku, and attribute_details.
+    # mfg_sku often encodes standard+spec (e.g. "DIN931 M8X40 A4-70") and must be searched.
     spec_keywords = parsed_intent.get("spec_keywords", [])
     for i, sk in enumerate(spec_keywords):
         conditions.append(
-            f"(item_name LIKE :sk_{i} OR specification LIKE :sk_{i} OR attribute_details LIKE :sk_{i})"
+            f"(item_name LIKE :sk_{i} OR specification LIKE :sk_{i}"
+            f" OR mfg_sku LIKE :sk_{i} OR attribute_details LIKE :sk_{i})"
         )
         params[f"sk_{i}"] = f"%{sk}%"
 
