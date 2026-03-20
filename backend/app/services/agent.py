@@ -5,6 +5,7 @@ from collections.abc import AsyncGenerator
 from app.db.mysql import AsyncSessionLocal
 from app.services.intent_parser import parse_intent
 from app.services.sku_search import search_skus, relaxed_search, attach_files, find_alternatives
+from app.services.competitor_search import search_ehsy
 from app.services.response_gen import (
     generate_response_stream,
     generate_broad_response_stream,
@@ -72,8 +73,20 @@ async def handle_message(
     _limit_map = {"precise": 20, "broad_spec": 8, "application": 5, "vague": 3}
     search_limit = _limit_map.get(query_type, 10)
 
+    # Build competitor query from keywords
+    kw_list = parsed.get("keywords") or []
+    spec_kw = parsed.get("spec_keywords") or []
+    brand_kw = parsed.get("brand") or ""
+    competitor_query = " ".join(kw_list + spec_kw + ([brand_kw] if brand_kw else ""))
+
     async with AsyncSessionLocal() as db_session:
-        results = await search_skus(db_session, parsed, limit=search_limit)
+        if competitor_query:
+            db_task = search_skus(db_session, parsed, limit=search_limit)
+            competitor_task = search_ehsy(competitor_query, limit=5)
+            (results, competitor_results) = await asyncio.gather(db_task, competitor_task)
+        else:
+            results = await search_skus(db_session, parsed, limit=search_limit)
+            competitor_results = []
 
         if not results:
             results = await relaxed_search(db_session, parsed, limit=search_limit)
@@ -86,6 +99,10 @@ async def handle_message(
     if results:
         sku_data = json.dumps(results, ensure_ascii=False, default=str)
         yield f"event: sku_results\ndata: {sku_data}\n\n"
+
+    if competitor_results:
+        comp_data = json.dumps(competitor_results, ensure_ascii=False, default=str)
+        yield f"event: competitor_results\ndata: {comp_data}\n\n"
 
     # Step 4: Generate response
     text_parts = []

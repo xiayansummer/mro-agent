@@ -116,6 +116,71 @@ export default function MessageBubble({ message, isFirst, sessionId }: Props) {
           </div>
         )}
 
+        {/* Competitor results */}
+        {message.competitorResults && message.competitorResults.length > 0 && (
+          <div style={{ marginBottom: 12 }}>
+            <div style={{
+              fontSize: 11,
+              fontFamily: "var(--mono)",
+              color: "var(--text-muted)",
+              marginBottom: 8,
+              display: "flex", alignItems: "center", gap: 6,
+            }}>
+              <span style={{
+                display: "inline-block",
+                width: 6, height: 6,
+                borderRadius: "50%",
+                background: "#f59e0b",
+              }} />
+              西域竞品参考价 ({message.competitorResults.length} 条)
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {message.competitorResults.map((item, i) => (
+                <div key={i} style={{
+                  background: "var(--surface)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 6,
+                  padding: "8px 12px",
+                  display: "flex", alignItems: "center", gap: 12,
+                  fontSize: 13,
+                }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    {item.url ? (
+                      <a
+                        href={item.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{ color: "var(--text-primary)", textDecoration: "none", fontWeight: 500 }}
+                        onMouseEnter={e => (e.currentTarget.style.color = "var(--accent)")}
+                        onMouseLeave={e => (e.currentTarget.style.color = "var(--text-primary)")}
+                      >
+                        {item.name}
+                      </a>
+                    ) : (
+                      <span style={{ fontWeight: 500 }}>{item.name}</span>
+                    )}
+                    {item.sku && (
+                      <span style={{ marginLeft: 8, fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--mono)" }}>
+                        {item.sku}
+                      </span>
+                    )}
+                  </div>
+                  {item.price && (
+                    <div style={{ flexShrink: 0, color: "#f59e0b", fontWeight: 600, fontFamily: "var(--mono)" }}>
+                      ¥{item.price}{item.unit ? `/${item.unit}` : ""}
+                    </div>
+                  )}
+                  {item.delivery && (
+                    <div style={{ flexShrink: 0, fontSize: 11, color: "var(--text-muted)" }}>
+                      {item.delivery}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Text content */}
         {message.content && (
           <div style={{

@@ -1,4 +1,4 @@
-import { SkuItem } from "../types";
+import { SkuItem, CompetitorItem } from "../types";
 
 export async function submitFeedback(
   sessionId: string,
@@ -30,6 +30,7 @@ const API_BASE = "/api";
 export interface SSECallbacks {
   onText: (text: string) => void;
   onSkuResults: (results: SkuItem[]) => void;
+  onCompetitorResults: (results: CompetitorItem[]) => void;
   onThinking: (msg: string) => void;
   onDone: () => void;
   onError: (err: string) => void;
@@ -82,6 +83,13 @@ export async function sendMessage(
           callbacks.onSkuResults(JSON.parse(data));
         } catch (e) {
           console.error("Failed to parse SKU results:", e);
+        }
+        break;
+      case "competitor_results":
+        try {
+          callbacks.onCompetitorResults(JSON.parse(data));
+        } catch (e) {
+          console.error("Failed to parse competitor results:", e);
         }
         break;
       case "thinking":

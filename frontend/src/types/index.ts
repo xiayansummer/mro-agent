@@ -18,12 +18,23 @@ export interface SkuItem {
   files?: SkuFile[];
 }
 
+export interface CompetitorItem {
+  name: string;
+  price: string | null;
+  unit: string | null;
+  sku: string | null;
+  url: string | null;
+  delivery: string | null;
+  source: string;
+}
+
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
   imageUrl?: string;     // Data URL for display in user bubble
   skuResults?: SkuItem[];
+  competitorResults?: CompetitorItem[];
   isStreaming?: boolean;
 }
 
