@@ -77,7 +77,7 @@ async def handle_message(
     kw_list = parsed.get("keywords") or []
     spec_kw = parsed.get("spec_keywords") or []
     brand_kw = parsed.get("brand") or ""
-    competitor_query = " ".join(kw_list + spec_kw + ([brand_kw] if brand_kw else ""))
+    competitor_query = " ".join(kw_list + spec_kw + ([brand_kw] if brand_kw else []))
 
     async with AsyncSessionLocal() as db_session:
         if competitor_query:
