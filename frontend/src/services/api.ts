@@ -66,6 +66,7 @@ export async function sendMessage(
   const decoder = new TextDecoder();
   let buffer = "";
   let finished = false;
+  let eventType = "";  // persists across chunks so event+data split across reads still works
 
   function handleEvent(event: string, data: string) {
     switch (event) {
@@ -107,7 +108,6 @@ export async function sendMessage(
     const lines = buffer.split("\n");
     buffer = lines.pop() || "";
 
-    let eventType = "";
     for (const line of lines) {
       if (line.startsWith("event: ")) {
         eventType = line.slice(7).trim();
