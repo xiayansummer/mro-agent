@@ -45,12 +45,21 @@ async def generate_response_stream(
     if query_type == "application" and inferred_need:
         expert_reasoning = f"\n\n专家判断：{inferred_need}"
 
+    table_instruction = """
+请用以下格式输出推荐产品表格（必须是标准 Markdown 表格，单元格内不得换行或使用 HTML）：
+
+| 编号 | 产品名称 | 关键规格 | 推荐理由 |
+|------|---------|---------|---------|
+| 1 | ... | ... | ... |"""
+
     prompt = f"""用户需求：{user_message}{expert_reasoning}
 
 搜索到 {len(sku_results)} 个相关产品：
 {sku_text}
+{"如果是用途场景查询，先一句话说明您的推断依据。" if query_type == "application" else ""}
+{table_instruction}
 
-请根据以上搜索结果为用户推荐合适的产品。{"如果是用途场景查询，先一句话说明您的推断依据，再列出推荐产品。" if query_type == "application" else ""}"""
+表格之后如有偏差说明或补充，用简短列表呈现。"""
 
     messages.append({"role": "user", "content": prompt})
 
