@@ -67,11 +67,16 @@ async def handle_message(
     # Step 2: Search SKUs (manage DB session ourselves to avoid leaks in SSE)
     yield f"event: thinking\ndata: 正在搜索产品...\n\n"
 
+    # Limit results by query precision to avoid overwhelming users
+    # precise → 20 results; broad_spec → 8; application → 5; vague → 3
+    _limit_map = {"precise": 20, "broad_spec": 8, "application": 5, "vague": 3}
+    search_limit = _limit_map.get(query_type, 10)
+
     async with AsyncSessionLocal() as db_session:
-        results = await search_skus(db_session, parsed, limit=20)
+        results = await search_skus(db_session, parsed, limit=search_limit)
 
         if not results:
-            results = await relaxed_search(db_session, parsed, limit=20)
+            results = await relaxed_search(db_session, parsed, limit=search_limit)
 
         results = await attach_files(db_session, results)
 
