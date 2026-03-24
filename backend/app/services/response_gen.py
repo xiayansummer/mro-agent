@@ -144,6 +144,64 @@ async def generate_broad_response_stream(
             yield delta.content
 
 
+async def generate_guided_selection_stream(
+    user_message: str,
+    inferred_need: str,
+    clarification_question: str,
+    conversation_context: list[dict] | None = None,
+    query_type: str = "",
+    memory_context: str = "",
+) -> AsyncGenerator[str, None]:
+    """
+    三步选型流程的第一步：先识别产品类型，再提专业问题。
+    不展示产品卡片，引导用户一步步确认需求。
+    """
+    is_novice = "级别：新手" in memory_context or "novice" in memory_context
+
+    if query_type == "vague":
+        system = "你是专业MRO采购顾问。用户描述比较宽泛，先帮他识别大致需要什么产品类别，再引导他提供关键信息以便精确匹配。"
+    elif is_novice:
+        system = "你是专业MRO采购顾问。用户是采购新手，先用通俗语言确认他的需求方向，再用简单问题引导他提供关键参数。解释每个问题为什么重要。"
+    else:
+        system = "你是专业MRO采购顾问。先确认用户的产品需求类型，再提出专业的技术参数问题。"
+
+    inferred_line = f"\n\n初步判断：{inferred_need}" if inferred_need else ""
+
+    prompt = f"""用户描述："{user_message}"{inferred_line}
+
+请按以下两步回复：
+
+**第一步：识别确认**
+用一段话告诉用户您判断他需要的是什么产品，以及理由（基于什么使用场景/用途）。用粗体标出产品类型名称。
+
+**第二步：关键问题**
+列出需要确认的关键参数，帮助最终确认产品规格：
+{clarification_question}
+
+要求：
+- 问题用有序列表，每条后加括号说明影响什么选择
+- 语气专业友好
+- 不超过200字，不展示任何产品列表"""
+
+    messages = [{"role": "system", "content": system}]
+    if conversation_context:
+        messages.extend(conversation_context)
+    messages.append({"role": "user", "content": prompt})
+
+    stream = client.chat.completions.create(
+        model=settings.AI_MODEL,
+        max_tokens=600,
+        messages=messages,
+        stream=True,
+        extra_body={"enable_thinking": False},
+    )
+
+    for chunk in stream:
+        delta = chunk.choices[0].delta if chunk.choices else None
+        if delta and delta.content:
+            yield delta.content
+
+
 async def generate_clarification_stream(
     user_message: str,
     clarification_question: str,

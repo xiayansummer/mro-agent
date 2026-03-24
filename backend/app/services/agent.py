@@ -9,6 +9,7 @@ from app.services.competitor_search import search_ehsy
 from app.services.response_gen import (
     generate_response_stream,
     generate_broad_response_stream,
+    generate_guided_selection_stream,
     generate_clarification_stream,
     generate_no_results_stream,
 )
@@ -95,12 +96,15 @@ async def handle_message(
 
     ctx["last_results"] = results
 
-    # Step 3: Send SKU results
-    if results:
+    # Guided mode: vague/application → identify first, no product cards yet
+    is_guided = need_clarification and query_type in ("vague", "application")
+
+    # Step 3: Send SKU results (skip for guided mode — products come after user confirms direction)
+    if results and not is_guided:
         sku_data = json.dumps(results, ensure_ascii=False, default=str)
         yield f"event: sku_results\ndata: {sku_data}\n\n"
 
-    if competitor_results:
+    if competitor_results and not is_guided:
         comp_data = json.dumps(competitor_results, ensure_ascii=False, default=str)
         yield f"event: competitor_results\ndata: {comp_data}\n\n"
 
@@ -108,7 +112,19 @@ async def handle_message(
     text_parts = []
     response_mode = "unknown"
 
-    if results and need_clarification:
+    if is_guided:
+        # Guided flow step 1+2: identify product type + ask structured questions
+        response_mode = "guided"
+        question = parsed.get("clarification_question", "能否提供更多细节？")
+        async for chunk in generate_guided_selection_stream(
+            user_message, inferred_need, question, conv_messages,
+            query_type=query_type, memory_context=memory_context,
+        ):
+            yield f"event: text\ndata: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+            text_parts.append(chunk)
+
+    elif results and need_clarification:
+        # broad_spec: show products + ask for missing specs
         response_mode = "broad"
         question = parsed.get("clarification_question", "能否提供更多细节？")
         async for chunk in generate_broad_response_stream(
