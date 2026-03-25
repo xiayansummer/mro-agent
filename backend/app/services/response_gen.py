@@ -157,7 +157,12 @@ async def generate_guided_selection_stream(
     is_novice = "级别：新手" in memory_context or "novice" in memory_context
 
     if query_type == "vague":
-        system = "你是专业MRO采购顾问。用户描述比较宽泛，先帮他识别大致需要什么产品类别，再引导他提供关键信息以便精确匹配。"
+        # Directly stream the clarification options — no AI regeneration needed
+        intro = "好的，我来帮您找合适的产品。"
+        content = f"{intro}\n\n{clarification_question}"
+        yield content
+        return
+
     elif is_novice:
         system = "你是专业MRO采购顾问。用户是采购新手，先用通俗语言确认他的需求方向，再用简单问题引导他提供关键参数。解释每个问题为什么重要。"
     else:
