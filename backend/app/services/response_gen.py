@@ -4,9 +4,61 @@ from app.config import settings
 
 client = OpenAI(api_key=settings.AI_API_KEY, base_url=settings.AI_BASE_URL)
 
-def _build_system_prompt(memory_context: str = "") -> str:
-    """Build response system prompt, optionally adjusted for user expertise."""
-    base = """你是一个专业的MRO工业品推荐顾问。根据用户需求和搜索到的SKU结果，简洁直接地推荐产品。
+def _build_system_prompt(memory_context: str = "", query_type: str = "") -> str:
+    """Build response system prompt, optionally adjusted for user expertise and query type."""
+    is_expert = "级别：专家" in memory_context or "expert" in memory_context
+    is_novice = "级别：新手" in memory_context or "novice" in memory_context
+
+    if query_type == "precise":
+        base = """你是一个专业的MRO工业品推荐顾问，同时具备深厚的产品标准和规格知识。
+
+回复结构（严格按此顺序，不加额外标题和开场白）：
+
+**规格要点**（仅3-4条，针对用户查询的具体产品）
+- 确认标准体系（如DIN/ISO/GB等效关系）
+- 核心尺寸或参数（对边、螺距、厚度等本次查询直接相关的）
+- 材质/等级含义（如A2-70、8.8级，一句话说清）
+
+**推荐产品**（Markdown表格，最多5个）
+| 编号 | 产品名称 | 关键规格 | 推荐理由 |
+|------|---------|---------|---------|
+
+**选型提示**（可选，只在有实质采购陷阱时输出，不超过2条）
+
+要求：
+- 规格要点每条一句话，不写段落，不超过4条
+- 不编造不存在于搜索结果中的产品
+- 表格单元格内严禁使用 <br> 或任何HTML标签
+- 总回复控制在500字以内"""
+        if is_expert:
+            base += "\n- 用户是采购专家，省略规格要点，直接从推荐产品开始"
+
+    elif query_type == "broad_spec":
+        base = """你是一个专业的MRO工业品推荐顾问，同时具备深厚的产品标准和规格知识。
+
+回复结构（严格按此顺序）：
+
+**品类说明**（2-3条，说明该品类主要子类型的区别，每条一句话）
+
+**规格速查**（可选——当搜索结果跨越多个规格时，用小表格列出2-4个典型规格的关键参数）
+
+**推荐产品**（Markdown表格，从搜索结果中选最有代表性的，最多5个）
+| 编号 | 产品名称 | 关键规格 | 推荐理由 |
+|------|---------|---------|---------|
+
+**还需确认**（一句话，提出最关键的缺失参数）
+
+要求：
+- 品类说明不写通用废话，只写有辨别价值的区别
+- 不编造不存在于搜索结果中的产品
+- 表格单元格内严禁使用 <br> 或任何HTML标签
+- 总回复控制在600字以内"""
+        if is_expert:
+            base += "\n- 用户是采购专家，省略品类说明和规格要点，使用技术术语，直接给参数对比"
+
+    else:
+        # application, vague, and other types — original prompt
+        base = """你是一个专业的MRO工业品推荐顾问。根据用户需求和搜索到的SKU结果，简洁直接地推荐产品。
 
 要求：
 - 直接列出最匹配的产品（最多5个），说明关键规格差异和推荐理由
@@ -16,11 +68,10 @@ def _build_system_prompt(memory_context: str = "") -> str:
 - 推荐产品列表请使用 Markdown 表格（用 | 分隔符），列出编号、产品名称、关键规格、推荐理由
 - 表格单元格内严禁使用 <br> 或任何 HTML 标签，每个单元格只写纯文本，换行信息合并成一句话
 - 表格外的补充说明用有序/无序列表"""
-
-    if "级别：专家" in memory_context or "expert" in memory_context:
-        base += "\n- 用户是采购专家，使用技术术语，直接给参数对比，无需解释基础知识"
-    elif "级别：新手" in memory_context or "novice" in memory_context:
-        base += "\n- 用户是采购新手，推荐时简要说明每种产品的适用场景，帮助其理解选择依据"
+        if is_expert:
+            base += "\n- 用户是采购专家，使用技术术语，直接给参数对比，无需解释基础知识"
+        elif is_novice:
+            base += "\n- 用户是采购新手，推荐时简要说明每种产品的适用场景，帮助其理解选择依据"
 
     return base
 
@@ -35,7 +86,7 @@ async def generate_response_stream(
 ) -> AsyncGenerator[str, None]:
     sku_text = format_skus_for_prompt(sku_results)
 
-    system_prompt = _build_system_prompt(memory_context)
+    system_prompt = _build_system_prompt(memory_context, query_type)
     messages = [{"role": "system", "content": system_prompt}]
     if conversation_context:
         messages.extend(conversation_context)
@@ -45,27 +96,18 @@ async def generate_response_stream(
     if query_type == "application" and inferred_need:
         expert_reasoning = f"\n\n专家判断：{inferred_need}"
 
-    table_instruction = """
-请用以下格式输出推荐产品表格（必须是标准 Markdown 表格，单元格内不得换行或使用 HTML）：
-
-| 编号 | 产品名称 | 关键规格 | 推荐理由 |
-|------|---------|---------|---------|
-| 1 | ... | ... | ... |"""
-
     prompt = f"""用户需求：{user_message}{expert_reasoning}
 
-搜索到 {len(sku_results)} 个相关产品：
+搜索到 {len(sku_results)} 个相关产品（真实库存数据，请直接基于这些推荐）：
 {sku_text}
-{"如果是用途场景查询，先一句话说明您的推断依据。" if query_type == "application" else ""}
-{table_instruction}
 
-表格之后如有偏差说明或补充，用简短列表呈现。"""
+请按系统提示的结构输出。规格要点只写与"{user_message}"直接相关的参数。"""
 
     messages.append({"role": "user", "content": prompt})
 
     stream = client.chat.completions.create(
         model=settings.AI_MODEL,
-        max_tokens=2048,
+        max_tokens=1024,
         messages=messages,
         stream=True,
     )
@@ -88,50 +130,34 @@ async def generate_broad_response_stream(
     """Generate response for broad/vague requests: show results AND guide user to refine."""
     sku_text = format_skus_for_prompt(sku_results)
 
-    is_novice = "级别：新手" in memory_context or "novice" in memory_context
-    is_expert = "级别：专家" in memory_context or "expert" in memory_context
-
-    if query_type == "application":
-        guidance = """用户描述的是使用场景，你需要：
-1. 先用一句话说出你作为采购顾问的专业判断（用户需要什么产品及原因）
-2. 展示已搜索到的相关产品，简要分组介绍
-3. 最后提出关键追问参数，帮助精确匹配"""
-    elif is_novice:
-        guidance = """用户是采购新手，需求比较宽泛，你需要：
-1. 先用通俗语言介绍搜索到的产品有哪几种类型
-2. 说明每种类型的典型使用场景，帮助用户理解
-3. 引导用户回答关键参数以精确筛选"""
-    else:
-        guidance = """用户的需求比较宽泛，你需要：
-1. 先展示已找到的产品概况，从搜索结果中按规格/材质分组
-2. 直接提出需要补充的关键参数"""
-
-    system_content = f"""你是一个资深MRO采购顾问。{guidance}
-
-语气要专业友好。不要编造不存在的产品信息，只基于提供的搜索结果推荐。"""
-
-    if is_expert:
-        system_content += "\n用户是采购专家，使用技术术语，直接给参数对比。"
+    system_content = _build_system_prompt(memory_context, query_type="broad_spec")
 
     messages = [{"role": "system", "content": system_content}]
     if conversation_context:
         messages.extend(conversation_context)
 
     inferred_line = f"\n\n专家判断：{inferred_need}" if inferred_need else ""
-    prompt = f"""用户需求：{user_message}{inferred_line}
+
+    spec_range = ""
+    if sku_results:
+        specs = [s.get("specification", "") for s in sku_results if s.get("specification")]
+        if len(specs) >= 2:
+            spec_range = f"\n搜索结果规格范围：{', '.join(specs[:4])}"
+
+    prompt = f"""用户需求：{user_message}{inferred_line}{spec_range}
 
 搜索到 {len(sku_results)} 个相关产品：
 {sku_text}
 
-需要进一步了解：{clarification_question}
+缺失的关键参数：{clarification_question}
 
-请按要求组织回复。"""
+请按系统提示的结构输出。"""
 
     messages.append({"role": "user", "content": prompt})
 
     stream = client.chat.completions.create(
         model=settings.AI_MODEL,
-        max_tokens=2048,
+        max_tokens=1400,
         messages=messages,
         stream=True,
     )
