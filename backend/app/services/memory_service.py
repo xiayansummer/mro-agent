@@ -158,9 +158,9 @@ class MemoryService:
 
         # Build category breadcrumb for tagging
         categories = [
-            intent.get("l2_category_name", ""),
-            intent.get("l3_category_name", ""),
-            intent.get("l4_category_name", ""),
+            intent.get("l2_category", ""),
+            intent.get("l3_category", ""),
+            intent.get("l4_category", ""),
         ]
         category_str = " > ".join(c for c in categories if c)
         category_tag = (
