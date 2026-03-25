@@ -83,10 +83,15 @@ export default function MessageBubble({ message, isFirst, sessionId }: Props) {
       <div style={{ flex: 1, minWidth: 0 }}>
         {/* Thinking / loading */}
         {message.isStreaming && !message.content && (
-          <div style={{ display: "flex", gap: 4, padding: "12px 0" }}>
-            <span className="thinking-dot" />
-            <span className="thinking-dot" />
-            <span className="thinking-dot" />
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "12px 0" }}>
+            <div style={{ display: "flex", gap: 4 }}>
+              <span className="thinking-dot" />
+              <span className="thinking-dot" />
+              <span className="thinking-dot" />
+            </div>
+            {message.thinkingStatus && (
+              <span style={{ fontSize: 12, color: "#e53e3e", fontWeight: 500 }}>{message.thinkingStatus}</span>
+            )}
           </div>
         )}
 
