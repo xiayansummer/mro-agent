@@ -22,6 +22,10 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 
+# 轻量级内存会话计数器（重启后重置，仅用于触发偏好摘要更新）
+_session_counts: dict[str, int] = {}
+
+
 class MemoryService:
     def __init__(self):
         self._token: Optional[str] = None
@@ -210,6 +214,12 @@ class MemoryService:
         except Exception as e:
             logger.error(f"Memos: save_session_summary exception: {e}", exc_info=True)
 
+        # 每累计 10 次会话触发偏好摘要更新（fire-and-forget）
+        _session_counts[uid_tag] = _session_counts.get(uid_tag, 0) + 1
+        if _session_counts[uid_tag] % 10 == 0:
+            logger.info(f"Memos: triggering preference memo update for user {user_id[:8]}")
+            asyncio.ensure_future(self.update_preference_memo(user_id))
+
     # ── Public: High-level write (feedback) ───────────────────────────────
 
     async def save_feedback(
@@ -246,6 +256,87 @@ class MemoryService:
                 logger.info(f"Memos: feedback saved — memo name={result.get('name')}")
         except Exception as e:
             logger.error(f"Memos: save_feedback exception: {e}", exc_info=True)
+
+    # ── Public: Preference memo update ────────────────────────────────────
+
+    async def update_preference_memo(self, user_id: str) -> None:
+        """
+        聚合该用户的 feedback + session memos，写入一条 #preference 摘要 memo（覆盖旧版）。
+        Fire-and-forget，失败不抛出。
+        """
+        uid_tag = _uid_tag(user_id)
+        try:
+            feedback_memos, session_memos = await asyncio.gather(
+                self.list_memos(uid_tag, extra_tag="feedback", limit=100),
+                self.list_memos(uid_tag, extra_tag="session",  limit=50),
+            )
+
+            # 聚合 liked 品牌和品类
+            liked_brands: dict[str, int] = {}
+            liked_categories: dict[str, int] = {}
+            for memo in feedback_memos:
+                raw = memo.get("content", "")
+                if "#liked" not in raw:
+                    continue
+                for line in raw.splitlines():
+                    if line.startswith("**品牌：**"):
+                        b = line.replace("**品牌：**", "").strip()
+                        if b and b != "未知":
+                            liked_brands[b] = liked_brands.get(b, 0) + 1
+                    elif line.startswith("**品类：**"):
+                        c = line.replace("**品类：**", "").strip()
+                        if c and c != "未知":
+                            top = c.split(" > ")[0]
+                            liked_categories[top] = liked_categories.get(top, 0) + 1
+
+            # 聚合常用规格
+            spec_counter: dict[str, int] = {}
+            for memo in session_memos:
+                raw = memo.get("content", "")
+                for line in raw.splitlines():
+                    if line.startswith("**规格要求：**"):
+                        specs_str = line.replace("**规格要求：**", "").strip()
+                        if specs_str and specs_str != "无":
+                            for spec in specs_str.split(","):
+                                s = spec.strip()
+                                if s:
+                                    spec_counter[s] = spec_counter.get(s, 0) + 1
+
+            top_brands = sorted(liked_brands, key=liked_brands.get, reverse=True)[:5]
+            top_cats   = sorted(liked_categories, key=liked_categories.get, reverse=True)[:4]
+            top_specs  = sorted(spec_counter, key=spec_counter.get, reverse=True)[:5]
+
+            content = (
+                f"## 用户偏好摘要（自动更新）\n"
+                f"偏好品牌：{', '.join(top_brands) if top_brands else '暂无'}\n"
+                f"常用品类：{', '.join(top_cats)   if top_cats   else '暂无'}\n"
+                f"常用规格：{', '.join(top_specs)  if top_specs  else '暂无'}\n\n"
+                f"#{uid_tag} #preference"
+            )
+
+            # 删除旧 preference memos，写入新的
+            old = await self.list_memos(uid_tag, extra_tag="preference", limit=10)
+            for memo in old:
+                await self._delete_memo(memo.get("name", ""))
+
+            await self.create_memo(content)
+            logger.info(f"Memos: preference memo updated for user {user_id[:8]}")
+
+        except Exception as e:
+            logger.error(f"Memos: update_preference_memo failed: {e}", exc_info=True)
+
+    async def _delete_memo(self, memo_name: str) -> None:
+        """删除指定 memo（按 name 字段，格式为 'memos/xxx'）。"""
+        if not memo_name:
+            return
+        try:
+            headers = await self._auth_headers()
+            async with self._make_client() as client:
+                resp = await client.delete(f"/api/v1/{memo_name}", headers=headers)
+                if resp.status_code not in (200, 204):
+                    logger.warning(f"Memos delete {memo_name}: {resp.status_code}")
+        except Exception as e:
+            logger.error(f"Memos _delete_memo failed: {e}")
 
     # ── Public: High-level read ────────────────────────────────────────────
 
