@@ -145,12 +145,25 @@ async def generate_broad_response_stream(
         if len(specs) >= 2:
             spec_range = f"\n搜索结果规格范围：{', '.join(specs[:4])}"
 
+    # 构建缺失参数追问段
+    if attribute_suggestions:
+        attr_lines: list[str] = []
+        for gap_name, options in attribute_suggestions.items():
+            attr_lines.append(f"\n**{gap_name}的参考选项：**")
+            for opt in options:
+                star = " ⭐ 最常用" if opt.get("is_common") else ""
+                note = f" — {opt['note']}" if opt.get("note") else ""
+                attr_lines.append(f"→ {opt['value']}{star}{note}")
+        clarification_block = "缺失参数及建议选项：" + "\n".join(attr_lines)
+    else:
+        clarification_block = f"缺失的关键参数：{clarification_question}"
+
     prompt = f"""用户需求：{user_message}{inferred_line}{spec_range}
 
 搜索到 {len(sku_results)} 个相关产品：
 {sku_text}
 
-缺失的关键参数：{clarification_question}
+{clarification_block}
 
 请按系统提示的结构输出。"""
 
@@ -318,6 +331,80 @@ async def generate_no_results_stream(
     stream = client.chat.completions.create(
         model=settings.AI_MODEL,
         max_tokens=600,
+        messages=messages,
+        stream=True,
+    )
+
+    for chunk in stream:
+        delta = chunk.choices[0].delta if chunk.choices else None
+        if delta and delta.content:
+            yield delta.content
+
+
+async def generate_equivalent_stream(
+    user_message: str,
+    equivalent_results: list[dict],
+    original_standard: str,
+    memory_context: str = "",
+) -> AsyncGenerator[str, None]:
+    """
+    当库中无直接匹配但找到等效标准替代品时调用。
+    输出五段产品知识卡片 + 等效产品推荐表格。
+    """
+    sku_text = format_skus_for_prompt(equivalent_results)
+
+    system_content = f"""你是一个专业的MRO工业品顾问，擅长工业标准规范和产品选型。
+
+用户搜索的 {original_standard} 在库中无直接库存，但找到了完全等效的替代产品。
+
+请按以下结构输出（严格按顺序，不加额外开场白）：
+
+## {original_standard} — 产品知识
+
+**① 定义与标识**
+（2-3句：该标准的类型定义、与其他标准的等效关系）
+
+**② 主流材质与性能**
+（每种材质一行：材质等级 — 力学性能 — 适用场景）
+
+**③ 典型规格示例**
+（该品类工业最常用规格范围，一句话）
+
+**④ 选型和采购要点**
+（2-3条实用采购注意事项，每条一句话）
+
+**⑤ 常见误区**
+（1-2条该类产品常见混淆点，每条一句话）
+
+---
+以下产品与您搜索的 {original_standard} 完全等效（真实库存）：
+
+| 编号 | 产品名称 | 关键规格 | 说明 |
+|------|---------|---------|------|
+
+要求：
+- 知识内容基于行业标准知识生成，准确简洁
+- 产品表格只展示以下搜索结果中的真实产品，说明列统一写"≡ {original_standard}，可直接替代"
+- 表格单元格内严禁 <br> 或任何 HTML 标签
+- 总回复控制在 600 字以内"""
+
+    is_expert = "级别：专家" in memory_context or "expert" in memory_context
+    if is_expert:
+        system_content += "\n- 用户是采购专家，省略知识卡片①②③，直接从④选型要点开始"
+
+    messages = [
+        {"role": "system", "content": system_content},
+        {"role": "user", "content": f"""用户需求：{user_message}
+
+以下是找到的等效替代产品（真实库存）：
+{sku_text}
+
+请按系统提示结构输出产品知识卡片和等效推荐。"""},
+    ]
+
+    stream = client.chat.completions.create(
+        model=settings.AI_MODEL,
+        max_tokens=1200,
         messages=messages,
         stream=True,
     )
