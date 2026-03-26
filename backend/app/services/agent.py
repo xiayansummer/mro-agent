@@ -113,6 +113,35 @@ async def handle_message(
         results = rank_by_preference(results, memory_context)
         ctx["last_results"] = results
 
+    # ── 等效标准替代（结果 < 3 且含已知标准号）──────────────────────────
+    equivalent_results: list[dict] = []
+    original_standard: str = ""
+    if len(results) < 3 and not need_clarification:
+        all_kws = (parsed.get("keywords") or []) + (parsed.get("spec_keywords") or [])
+        equivalents = find_equivalents(all_kws)
+        if equivalents:
+            # 找出触发等效替代的原始标准号（从 all_kws 中找第一个匹配已知标准的关键词）
+            from app.services.standard_mapping import STANDARD_EQUIVALENTS
+            for kw in all_kws:
+                normalized = kw.upper().replace(" ", "").replace("/", "").replace("-", "").replace(".", "")
+                if normalized in {k.upper().replace(" ", "").replace("/", "").replace("-", "").replace(".", "") for k in STANDARD_EQUIVALENTS}:
+                    original_standard = kw
+                    break
+
+            yield f"event: thinking\ndata: 正在搜索等效替代产品...\n\n"
+            equiv_parsed = {
+                **parsed,
+                "spec_keywords": (parsed.get("spec_keywords") or []) + equivalents,
+            }
+            async with AsyncSessionLocal() as db_session:
+                equivalent_results = await search_skus(db_session, equiv_parsed, limit=search_limit)
+                equivalent_results = await attach_files(db_session, equivalent_results)
+
+            if equivalent_results:
+                ctx["last_results"] = equivalent_results
+                equiv_data = json.dumps(equivalent_results, ensure_ascii=False, default=str)
+                yield f"event: sku_results\ndata: {equiv_data}\n\n"
+
     # Guided mode: vague/application → identify first, no product cards yet
     is_guided = need_clarification and query_type in ("vague", "application")
 
@@ -152,7 +181,17 @@ async def handle_message(
             yield f"event: text\ndata: {json.dumps(chunk, ensure_ascii=False)}\n\n"
             text_parts.append(chunk)
 
-    elif results:
+    elif equivalent_results and original_standard:
+        response_mode = "equivalent"
+        from app.services.response_gen import generate_equivalent_stream
+        async for chunk in generate_equivalent_stream(
+            user_message, equivalent_results, original_standard,
+            memory_context=memory_context,
+        ):
+            yield f"event: text\ndata: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+            text_parts.append(chunk)
+
+    elif results and not equivalent_results:
         response_mode = "precise"
         async for chunk in generate_response_stream(
             user_message, results, conv_messages,
