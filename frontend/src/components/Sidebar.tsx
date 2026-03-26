@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { ChatSession } from "../types";
 
 interface Props {
@@ -31,6 +31,40 @@ export default function Sidebar({
 }: Props) {
   const sorted = [...sessions].sort((a, b) => b.createdAt - a.createdAt);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [importStatus, setImportStatus] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleImportClick = () => {
+    setImportStatus(null);
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+
+    setImportStatus("正在导入...");
+    const sessionId = localStorage.getItem("mro_session_id") || "unknown";
+
+    const form = new FormData();
+    form.append("file", file);
+    form.append("session_id", sessionId);
+
+    try {
+      const res = await fetch("/api/profile/import", { method: "POST", body: form });
+      const data = await res.json();
+      if (res.ok) {
+        setImportStatus(`✓ 已导入 ${data.total_records} 条记录`);
+      } else {
+        setImportStatus(`✗ ${data.detail || "导入失败"}`);
+      }
+    } catch {
+      setImportStatus("✗ 网络错误，请重试");
+    }
+
+    setTimeout(() => setImportStatus(null), 4000);
+  };
 
   return (
     <>
@@ -236,6 +270,32 @@ export default function Sidebar({
 
         {/* Footer */}
         <div style={{ borderTop: "1px solid var(--sidebar-border)", padding: "12px 16px" }} className="shrink-0">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".xlsx,.xls,.csv"
+            style={{ display: "none" }}
+            onChange={handleFileChange}
+          />
+          <button
+            onClick={handleImportClick}
+            style={{
+              width: "100%", background: "none", border: "1px solid var(--sidebar-border)",
+              borderRadius: 6, padding: "6px 10px", cursor: "pointer",
+              color: "var(--text-secondary)", fontSize: 11,
+              display: "flex", alignItems: "center", gap: 6, marginBottom: 8,
+            }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+            </svg>
+            导入采购历史
+          </button>
+          {importStatus && (
+            <div style={{ fontSize: 10, color: importStatus.startsWith("✓") ? "#48bb78" : "#e53e3e", marginBottom: 6 }}>
+              {importStatus}
+            </div>
+          )}
           <div style={{ color: "#3a3f52", fontSize: 11, display: "flex", alignItems: "center", gap: 6 }}>
             <span style={{ fontFamily: "var(--mono)" }}>v1.0</span>
             <span style={{ color: "#2a2f40" }}>·</span>
