@@ -14,6 +14,8 @@ from app.services.response_gen import (
     generate_no_results_stream,
 )
 from app.services.memory_service import memory_service
+from app.services.standard_mapping import find_equivalents, ATTRIBUTE_KNOWLEDGE
+from app.services.preference_ranker import rank_by_preference
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +40,9 @@ async def handle_message(
     image_base64: str = "",
 ) -> AsyncGenerator[str, None]:
     """Main agent orchestration: parse intent → search → generate response via SSE."""
+    # Immediately acknowledge receipt so the UI shows activity
+    yield "event: thinking\ndata: 正在理解需求...\n\n"
+
     ctx = get_session_context(session_id)
 
     # Build conversation context for Claude (keep last 6 turns)
@@ -96,6 +101,18 @@ async def handle_message(
 
     ctx["last_results"] = results
 
+    # ── 属性建议富化（broad_spec + attribute_gaps 时）──────────────────
+    attribute_gaps = parsed.get("attribute_gaps") or []
+    if attribute_gaps and query_type == "broad_spec" and results:
+        parsed["attribute_suggestions"] = _build_attribute_suggestions(
+            attribute_gaps, results, memory_context
+        )
+
+    # ── 偏好排序（所有有结果的查询）──────────────────────────────────────
+    if results and memory_context:
+        results = rank_by_preference(results, memory_context)
+        ctx["last_results"] = results
+
     # Guided mode: vague/application → identify first, no product cards yet
     is_guided = need_clarification and query_type in ("vague", "application")
 
@@ -130,6 +147,7 @@ async def handle_message(
         async for chunk in generate_broad_response_stream(
             user_message, results, question, conv_messages,
             query_type=query_type, inferred_need=inferred_need, memory_context=memory_context,
+            attribute_suggestions=parsed.get("attribute_suggestions"),
         ):
             yield f"event: text\ndata: {json.dumps(chunk, ensure_ascii=False)}\n\n"
             text_parts.append(chunk)
@@ -198,3 +216,60 @@ async def handle_message(
     )
 
     yield "event: done\ndata: \n\n"
+
+
+def _build_attribute_suggestions(
+    attribute_gaps: list[str],
+    results: list[dict],
+    memory_context: str,
+) -> dict[str, list[dict]]:
+    """
+    对每个 attribute_gap，从行业知识库取基础选项，
+    过滤保留搜索结果中实际出现的值，并将用户偏好项排到首位。
+    """
+    result_text = " ".join(
+        f"{r.get('specification', '')} {r.get('attribute_details', '')}"
+        for r in results
+    ).lower()
+
+    preferred_values = _preferred_attr_values(memory_context)
+    suggestions: dict[str, list[dict]] = {}
+
+    for gap in attribute_gaps:
+        base_options = ATTRIBUTE_KNOWLEDGE.get(gap, [])
+        if not base_options:
+            continue
+
+        # 过滤到结果中实际存在的选项（找不到匹配时保留全部）
+        matched = [opt for opt in base_options if _value_appears_in_text(opt["value"], result_text)]
+        options = matched if matched else base_options
+
+        # 用户偏好项排到首位
+        if preferred_values:
+            preferred = [opt for opt in options
+                         if opt["value"].split("（")[0].lower() in preferred_values]
+            others = [opt for opt in options
+                      if opt["value"].split("（")[0].lower() not in preferred_values]
+            options = preferred + others
+
+        suggestions[gap] = options
+
+    return suggestions
+
+
+def _value_appears_in_text(value: str, text: str) -> bool:
+    """检查选项的核心标识符是否出现在结果文本中。"""
+    core = value.split("（")[0].strip().lower()
+    return bool(core) and core in text
+
+
+def _preferred_attr_values(memory_context: str) -> set[str]:
+    """从 memory_context 提取偏好材质/规格关键词（小写）。"""
+    preferred: set[str] = set()
+    for line in memory_context.splitlines():
+        if "偏好材质" in line or "常用规格" in line:
+            parts = line.split("：", 1)
+            if len(parts) == 2:
+                for p in parts[1].split(","):
+                    preferred.add(p.strip().lower())
+    return preferred
