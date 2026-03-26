@@ -7,6 +7,7 @@ from app.routers.chat import router as chat_router
 from app.routers.competitor import router as competitor_router
 from app.routers.feedback import router as feedback_router
 from app.routers.inquiry import router as inquiry_router
+from app.routers.profile import router as profile_router
 from app.services.memory_service import memory_service
 
 logger = logging.getLogger(__name__)
@@ -25,6 +26,7 @@ app.include_router(chat_router, prefix="/api")
 app.include_router(competitor_router, prefix="/api")
 app.include_router(feedback_router, prefix="/api")
 app.include_router(inquiry_router, prefix="/api")
+app.include_router(profile_router, prefix="/api")
 
 
 @app.on_event("startup")
