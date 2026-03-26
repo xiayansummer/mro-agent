@@ -34,12 +34,12 @@ def _parse_preferences(memory_context: str) -> dict:
         if line.startswith("偏好品牌："):
             for brand in line[len("偏好品牌："):].split(","):
                 b = brand.strip()
-                if b:
-                    liked_brands[b] = liked_brands.get(b, 0) + 1
+                if b and b not in liked_brands:
+                    liked_brands[b] = 1
         elif line.startswith("常用品类："):
             for cat in line[len("常用品类："):].split(","):
                 c = cat.strip()
-                if c:
-                    liked_categories[c] = liked_categories.get(c, 0) + 1
+                if c and c not in liked_categories:
+                    liked_categories[c] = 1
 
     return {"liked_brands": liked_brands, "liked_categories": liked_categories}

@@ -27,6 +27,7 @@ STANDARD_EQUIVALENTS: dict[str, list[str]] = {
     "GBT6170": ["DIN 934",  "ISO 4032"],
     "GBT5783": ["DIN 933",  "ISO 4017"],
     "GBT5782": ["DIN 931",  "ISO 4014"],
+    "ISO7042": ["DIN 985", "GB/T 6184"],
 }
 
 _NORM_TO_EQUIVALENTS: dict[str, list[str]] = {}

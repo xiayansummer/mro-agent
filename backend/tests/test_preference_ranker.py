@@ -39,3 +39,11 @@ def test_tiebreak_preserves_original_order():
     results = [_sku("A001", "未知"), _sku("A002", "未知")]
     ranked = rank_by_preference(results, MEMORY_WITH_BRAND)
     assert [r["item_code"] for r in ranked] == ["A001", "A002"]
+
+def test_none_brand_and_category_handled():
+    results = [
+        {"item_code": "A001", "item_name": "产品A", "brand_name": None, "l2_category_name": None},
+        {"item_code": "A002", "item_name": "产品B", "brand_name": "SMC",  "l2_category_name": "螺栓螺母"},
+    ]
+    ranked = rank_by_preference(results, MEMORY_WITH_BRAND)
+    assert ranked[0]["item_code"] == "A002"
