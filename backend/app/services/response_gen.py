@@ -126,6 +126,7 @@ async def generate_broad_response_stream(
     query_type: str = "",
     inferred_need: str = "",
     memory_context: str = "",
+    attribute_suggestions: dict | None = None,
 ) -> AsyncGenerator[str, None]:
     """Generate response for broad/vague requests: show results AND guide user to refine."""
     sku_text = format_skus_for_prompt(sku_results)

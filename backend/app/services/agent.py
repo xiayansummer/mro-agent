@@ -14,7 +14,7 @@ from app.services.response_gen import (
     generate_no_results_stream,
 )
 from app.services.memory_service import memory_service
-from app.services.standard_mapping import find_equivalents, ATTRIBUTE_KNOWLEDGE
+from app.services.standard_mapping import find_equivalents, ATTRIBUTE_KNOWLEDGE  # noqa: F401  # find_equivalents used in Task 6
 from app.services.preference_ranker import rank_by_preference
 
 logger = logging.getLogger(__name__)
