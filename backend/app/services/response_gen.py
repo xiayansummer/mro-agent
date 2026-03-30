@@ -36,25 +36,22 @@ def _build_system_prompt(memory_context: str = "", query_type: str = "") -> str:
     elif query_type == "broad_spec":
         base = """你是一个专业的MRO工业品推荐顾问，同时具备深厚的产品标准和规格知识。
 
-回复结构（严格按此顺序）：
+回复结构（严格按此顺序，追问部分由系统统一处理，你只输出前两块）：
 
 **品类说明**（2-3条，说明该品类主要子类型的区别，每条一句话）
-
-**规格速查**（可选——当搜索结果跨越多个规格时，用小表格列出2-4个典型规格的关键参数）
 
 **推荐产品**（Markdown表格，从搜索结果中选最有代表性的，最多5个）
 | 编号 | 产品名称 | 关键规格 | 推荐理由 |
 |------|---------|---------|---------|
 
-**还需确认**（一句话，提出最关键的缺失参数）
-
 要求：
 - 品类说明不写通用废话，只写有辨别价值的区别
 - 不编造不存在于搜索结果中的产品
 - 表格单元格内严禁使用 <br> 或任何HTML标签
-- 总回复控制在600字以内"""
+- 输出到推荐产品表格结束即停止，不要输出任何追问内容
+- 总回复控制在500字以内"""
         if is_expert:
-            base += "\n- 用户是采购专家，省略品类说明和规格要点，使用技术术语，直接给参数对比"
+            base += "\n- 用户是采购专家，省略品类说明，使用技术术语，直接给参数对比"
 
     else:
         # application, vague, and other types — original prompt
@@ -146,33 +143,18 @@ async def generate_broad_response_stream(
         if len(specs) >= 2:
             spec_range = f"\n搜索结果规格范围：{', '.join(specs[:4])}"
 
-    # 构建缺失参数追问段
-    if attribute_suggestions:
-        attr_lines: list[str] = []
-        for gap_name, options in attribute_suggestions.items():
-            attr_lines.append(f"\n**{gap_name}的参考选项：**")
-            for opt in options:
-                star = " ⭐ 最常用" if opt.get("is_common") else ""
-                note = f" — {opt['note']}" if opt.get("note") else ""
-                attr_lines.append(f"→ {opt['value']}{star}{note}")
-        clarification_block = "缺失参数及建议选项：" + "\n".join(attr_lines)
-    else:
-        clarification_block = f"缺失的关键参数：{clarification_question}"
-
     prompt = f"""用户需求：{user_message}{inferred_line}{spec_range}
 
 搜索到 {len(sku_results)} 个相关产品：
 {sku_text}
 
-{clarification_block}
-
-请按系统提示的结构输出。"""
+请按系统提示的结构输出（只输出品类说明和推荐产品，不要输出追问）。"""
 
     messages.append({"role": "user", "content": prompt})
 
     stream = client.chat.completions.create(
         model=settings.AI_MODEL,
-        max_tokens=1400,
+        max_tokens=1000,
         messages=messages,
         stream=True,
         extra_body={"enable_thinking": False},
@@ -182,6 +164,9 @@ async def generate_broad_response_stream(
         delta = chunk.choices[0].delta if chunk.choices else None
         if delta and delta.content:
             yield delta.content
+
+    # Inject the 5-field clarification table directly (more reliable than LLM-generated)
+    yield f"\n\n---\n\n**请确认以下参数，以便精准匹配：**\n\n{clarification_question}"
 
 
 async def generate_guided_selection_stream(
@@ -199,9 +184,9 @@ async def generate_guided_selection_stream(
     is_novice = "级别：新手" in memory_context or "novice" in memory_context
 
     if query_type == "vague":
-        # Directly stream the clarification options — no AI regeneration needed
-        intro = "好的，我来帮您找合适的产品。"
-        content = f"{intro}\n\n{clarification_question}"
+        # Directly stream the 5-field clarification table — no AI regeneration needed
+        inferred_line = f"**初步判断**：{inferred_need}\n\n" if inferred_need else ""
+        content = f"{inferred_line}请告诉我您的具体需求，以便精准推荐：\n\n{clarification_question}"
         yield content
         return
 
