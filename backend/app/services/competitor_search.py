@@ -1,202 +1,148 @@
 """
-Competitor price search — 西域 (ehsy.com)
+Competitor price search — 西域 (ehsy.com) via mobile app API
 
-Fetches search results from https://www.ehsy.com/search?k=<query>
-and parses product name, price, SKU, and URL.
-No authentication required; product data is in static HTML.
+Calls the m2.ehsy.com JSON API used by the ehsy mobile app.
+No HTML scraping — returns structured product data directly.
 """
 
+import base64
+import hashlib
+import json
 import logging
-import re
+import time
 from typing import Optional
 
 import httpx
-from bs4 import BeautifulSoup
+from Crypto.Cipher import AES
+from Crypto.Util.Padding import pad
 
 logger = logging.getLogger(__name__)
 
-EHSY_SEARCH_URL = "https://www.ehsy.com/search"
-EHSY_BASE_URL = "https://www.ehsy.com"
+EHSY_API_BASE = "https://m2.ehsy.com/"
+EHSY_SEARCH_PATH = "pb/product/search/filter"
+EHSY_PRODUCT_URL = "https://www.ehsy.com/product-{sku}"
+
+# AES key material (from app JS bundle)
+_AES_GLOBAL_SECRET = "GvcaHhBsKa9kkHmf"
+
+
+def _md5hex(s: str) -> str:
+    return hashlib.md5(s.encode()).hexdigest()
+
+
+def _ehsy_verify() -> str:
+    """
+    Generate the ehsy-verify auth header required by the app API.
+    Algorithm reversed from app JS bundle (module eec8 / aes_gobal function).
+    """
+    timestamp = str(int(time.time()))
+    chars = list(_md5hex(timestamp))
+    chars[2] = "e"
+    chars[6] = "h"
+    chars[12] = "6"
+    chars[25] = "b"
+    plaintext = "".join(chars) + timestamp
+    key_bytes = bytes.fromhex(_md5hex(_AES_GLOBAL_SECRET))
+    cipher = AES.new(key_bytes, AES.MODE_ECB)
+    encrypted = cipher.encrypt(pad(plaintext.encode("utf-8"), 16))
+    return base64.b64encode(encrypted).decode()
+
 
 HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/120.0.0.0 Safari/537.36"
-    ),
-    "Accept-Language": "zh-CN,zh;q=0.9",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "User-Agent": "ehsy/4.7.19 (iPhone; iOS 17.0; Scale/3.00)",
+    "Accept": "application/json",
+    "Accept-Language": "zh-Hans-CN;q=1",
+    "Content-Type": "application/x-www-form-urlencoded",
 }
 
 
 async def search_ehsy(query: str, limit: int = 5) -> list[dict]:
     """
-    Search 西域 (ehsy.com) for a product and return structured results.
+    Search 西域 (ehsy.com) via the mobile app API.
 
     Returns list of dicts with keys:
-      name, price, unit, sku, url, delivery
+      name, price, unit, sku, url, brand, delivery, source
     """
     try:
-        async with httpx.AsyncClient(
-            headers=HEADERS,
-            timeout=httpx.Timeout(10.0, connect=5.0),
-            follow_redirects=True,
-        ) as client:
-            resp = await client.get(EHSY_SEARCH_URL, params={"k": query})
-            resp.raise_for_status()
-            html = resp.text
+        search_body = json.dumps({"keywords": query}, ensure_ascii=False)
+        form_data = {
+            "search": search_body,
+            "sortType": "",
+            "start": "0",
+            "rows": str(min(limit * 2, 20)),  # fetch extra, filter down
+            "cityId": "",
+            "fuzzy": "false",
+            "unchange": "false",
+            "token": "",
+            "createFrom": "",
+        }
+        headers = {**HEADERS, "ehsy-verify": _ehsy_verify()}
 
-        return _parse_results(html, limit)
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(12.0, connect=5.0),
+        ) as client:
+            resp = await client.post(
+                EHSY_API_BASE + EHSY_SEARCH_PATH,
+                data=form_data,
+                headers=headers,
+            )
+            resp.raise_for_status()
+            body = resp.json()
+
+        if str(body.get("mark")) != "0":
+            logger.warning(f"ehsy API non-zero mark: {body.get('mark')} {body.get('message')}")
+            return []
+
+        products = body.get("data", {}).get("queryPage", {}).get("data", [])
+        return _parse_products(products, limit)
 
     except httpx.TimeoutException:
-        logger.warning(f"ehsy search timeout for query: {query}")
+        logger.warning(f"ehsy API timeout for query: {query}")
         return []
     except Exception as e:
-        logger.error(f"ehsy search error: {e}")
+        logger.error(f"ehsy API error: {e}")
         return []
 
 
-def _parse_results(html: str, limit: int) -> list[dict]:
-    soup = BeautifulSoup(html, "html.parser")
+def _parse_products(products: list, limit: int) -> list[dict]:
     results = []
-
-    # Product cards are in <div class="product"> or similar containers
-    # Try multiple selectors to be resilient to layout changes
-    cards = (
-        soup.select("div.product")
-        or soup.select("li.product-item")
-        or soup.select("[class*='product-card']")
-    )
-
-    for card in cards[:limit]:
-        item = _parse_card(card)
+    for p in products[:limit]:
+        item = _parse_product(p)
         if item:
             results.append(item)
-
-    # Fallback: try table rows if cards not found
-    if not results:
-        results = _parse_table_fallback(soup, limit)
-
     return results
 
 
-def _parse_card(card) -> Optional[dict]:
-    """Extract product info from a single product card element."""
+def _parse_product(p: dict) -> Optional[dict]:
     try:
-        # SKU from data-text attribute on div.product
-        sku = card.get("data-text") or None
-
-        # Product name — from div.p-name a[title] (most reliable)
-        name = None
-        name_tag = card.select_one("div.p-name a[title]")
-        if name_tag:
-            name = name_tag.get("title", "").strip() or name_tag.get_text(strip=True)
-        if not name:
-            # Fallback: title attr on any product link
-            for a in card.find_all("a", href=re.compile(r"/product-[A-Z0-9]+")):
-                t = a.get("title", "").strip() or a.get_text(strip=True)
-                if 5 < len(t) < 150:
-                    name = t
-                    break
-
+        name = p.get("productName", "")
         if not name:
             return None
 
-        # Product URL
-        url = None
-        link_tag = card.select_one("a[href*='/product-']")
-        if link_tag:
-            href = link_tag.get("href", "")
-            url = href if href.startswith("http") else EHSY_BASE_URL + href
-            if not sku:
-                m = re.search(r"/product-([A-Z0-9]+)", href)
-                if m:
-                    sku = m.group(1)
+        sku_code = p.get("skuCode") or p.get("platFormSku") or ""
+        url = EHSY_PRODUCT_URL.format(sku=sku_code) if sku_code else None
 
-        # Price — div.price .yen is most reliable
-        price = None
-        price_tag = card.select_one("div.price .yen, div.price .now_money .yen")
-        if price_tag:
-            price_text = price_tag.get_text(strip=True).replace("¥", "").replace(",", "").strip()
-            if re.match(r"[\d.]+", price_text):
-                price = price_text
-        if not price:
-            m = re.search(r"¥\s*([\d,]+\.?\d*)", card.get_text())
-            if m:
-                price = m.group(1).replace(",", "")
+        # Price: use salePrice (after-tax price shown to user), fall back to marketPrice
+        price = p.get("salePrice") or p.get("marketPrice") or None
+        unit = p.get("saleUom") or None
+        brand = p.get("brandName") or None
 
-        # Unit from product name (售卖规格: XX个/包)
-        unit = None
-        unit_match = re.search(r"售卖规格[：:]\s*\d+\s*(个|包|盒|套|件|条|卷|片|袋|瓶|桶|箱|只|副|对)", name)
-        if not unit_match:
-            unit_match = re.search(r"/(包|个|盒|套|件|条|卷|片|袋|瓶|桶|箱|只|副|对)", card.get_text())
-        if unit_match:
-            unit = unit_match.group(1)
-
-        # Brand from .product-parameter li.high-light
-        brand = None
-        brand_tag = card.select_one(".product-parameter li.high-light")
-        if brand_tag:
-            brand = brand_tag.get_text(strip=True)
-
-        # Delivery
+        # Delivery: realDeliveryTime is in working days
         delivery = None
-        stock_tag = card.select_one("i[class*='today'], i[class*='product-text']")
-        if stock_tag:
-            delivery = stock_tag.get_text(strip=True)
+        delivery_days = p.get("realDeliveryTime")
+        if delivery_days is not None:
+            delivery = f"{delivery_days}个工作日"
 
         return {
             "name": name[:100],
             "brand": brand,
-            "price": price,
+            "price": str(price) if price else None,
             "unit": unit,
-            "sku": sku,
+            "sku": str(sku_code) if sku_code else None,
             "url": url,
             "delivery": delivery,
             "source": "西域",
         }
-
     except Exception as e:
-        logger.debug(f"Card parse error: {e}")
+        logger.debug(f"Product parse error: {e}")
         return None
-
-
-def _parse_table_fallback(soup: BeautifulSoup, limit: int) -> list[dict]:
-    """
-    Fallback parser: scan all text for price patterns near product names.
-    Used when card-based selectors don't match the page layout.
-    """
-    results = []
-    # Find all product links pointing to /product-XXXXX
-    for a in soup.find_all("a", href=re.compile(r"/product-[A-Z0-9]+")):
-        if len(results) >= limit:
-            break
-
-        name = a.get_text(strip=True)
-        if not (5 < len(name) < 120):
-            continue
-
-        href = a.get("href", "")
-        url = href if href.startswith("http") else EHSY_BASE_URL + href
-        sku_match = re.search(r"/product-([A-Z0-9]+)", href)
-        sku = sku_match.group(1) if sku_match else None
-
-        # Look for price in nearby text (parent or sibling elements)
-        parent = a.find_parent()
-        context = parent.get_text() if parent else ""
-        price = None
-        price_match = re.search(r"¥\s*([\d,]+\.?\d*)", context)
-        if price_match:
-            price = price_match.group(1).replace(",", "")
-
-        results.append({
-            "name": name[:80],
-            "price": price,
-            "unit": None,
-            "sku": sku,
-            "url": url,
-            "delivery": None,
-            "source": "西域",
-        })
-
-    return results
