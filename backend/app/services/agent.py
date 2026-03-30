@@ -142,10 +142,12 @@ async def handle_message(
                 equiv_data = json.dumps(equivalent_results, ensure_ascii=False, default=str)
                 yield f"event: sku_results\ndata: {equiv_data}\n\n"
 
-    # Guided mode: vague/application → identify first, no product cards yet
-    is_guided = need_clarification and query_type in ("vague", "application")
+    # Guided mode: vague only — application now searches first, shows products if found
+    is_guided = need_clarification and query_type == "vague"
+    # application with no results falls back to guided knowledge response
+    application_no_results = query_type == "application" and not results
 
-    # Step 3: Send SKU results (skip for guided mode — products come after user confirms direction)
+    # Step 3: Send SKU results (skip for guided/no-results application)
     if results and not is_guided:
         sku_data = json.dumps(results, ensure_ascii=False, default=str)
         yield f"event: sku_results\ndata: {sku_data}\n\n"
@@ -158,7 +160,14 @@ async def handle_message(
     text_parts = []
     response_mode = "unknown"
 
-    if is_guided:
+    # Prepend structured requirement summary for application queries with results
+    requirement_summary = parsed.get("requirement_summary")
+    if requirement_summary and query_type == "application" and results:
+        summary_text = f"**需求解析：** {requirement_summary}\n\n---\n\n"
+        yield f"event: text\ndata: {json.dumps(summary_text, ensure_ascii=False)}\n\n"
+        text_parts.append(summary_text)
+
+    if is_guided or application_no_results:
         # Guided flow step 1+2: identify product type + ask structured questions
         response_mode = "guided"
         question = parsed.get("clarification_question", "能否提供更多细节？")
