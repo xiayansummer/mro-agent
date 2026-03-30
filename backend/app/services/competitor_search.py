@@ -83,17 +83,20 @@ def _parse_results(html: str, limit: int) -> list[dict]:
 def _parse_card(card) -> Optional[dict]:
     """Extract product info from a single product card element."""
     try:
-        # Product name — find the most prominent link/text
+        # SKU from data-text attribute on div.product
+        sku = card.get("data-text") or None
+
+        # Product name — from div.p-name a[title] (most reliable)
         name = None
-        name_tag = card.select_one("a.product-name, a[href*='/product-'], .product-title a")
+        name_tag = card.select_one("div.p-name a[title]")
         if name_tag:
-            name = name_tag.get_text(strip=True)
+            name = name_tag.get("title", "").strip() or name_tag.get_text(strip=True)
         if not name:
-            # Fallback: first <a> with reasonable text length
-            for a in card.find_all("a", href=True):
-                text = a.get_text(strip=True)
-                if 5 < len(text) < 120:
-                    name = text
+            # Fallback: title attr on any product link
+            for a in card.find_all("a", href=re.compile(r"/product-[A-Z0-9]+")):
+                t = a.get("title", "").strip() or a.get_text(strip=True)
+                if 5 < len(t) < 150:
+                    name = t
                     break
 
         if not name:
@@ -102,44 +105,49 @@ def _parse_card(card) -> Optional[dict]:
         # Product URL
         url = None
         link_tag = card.select_one("a[href*='/product-']")
-        if link_tag and link_tag.get("href"):
-            href = link_tag["href"]
+        if link_tag:
+            href = link_tag.get("href", "")
             url = href if href.startswith("http") else EHSY_BASE_URL + href
+            if not sku:
+                m = re.search(r"/product-([A-Z0-9]+)", href)
+                if m:
+                    sku = m.group(1)
 
-        # Price — look for ¥ pattern
+        # Price — div.price .yen is most reliable
         price = None
-        price_text = card.get_text()
-        price_match = re.search(r"西域价[：:]\s*¥\s*([\d,]+\.?\d*)", price_text)
-        if not price_match:
-            price_match = re.search(r"¥\s*([\d,]+\.?\d*)", price_text)
-        if price_match:
-            price = price_match.group(1).replace(",", "")
+        price_tag = card.select_one("div.price .yen, div.price .now_money .yen")
+        if price_tag:
+            price_text = price_tag.get_text(strip=True).replace("¥", "").replace(",", "").strip()
+            if re.match(r"[\d.]+", price_text):
+                price = price_text
+        if not price:
+            m = re.search(r"¥\s*([\d,]+\.?\d*)", card.get_text())
+            if m:
+                price = m.group(1).replace(",", "")
 
-        # Unit (包/个/盒/套)
+        # Unit from product name (售卖规格: XX个/包)
         unit = None
-        unit_match = re.search(r"/(包|个|盒|套|件|条|卷|片|袋|瓶|桶)", price_text)
+        unit_match = re.search(r"售卖规格[：:]\s*\d+\s*(个|包|盒|套|件|条|卷|片|袋|瓶|桶|箱|只|副|对)", name)
+        if not unit_match:
+            unit_match = re.search(r"/(包|个|盒|套|件|条|卷|片|袋|瓶|桶|箱|只|副|对)", card.get_text())
         if unit_match:
             unit = unit_match.group(1)
 
-        # 西域订货号 (SKU)
-        sku = None
-        sku_match = re.search(r"西域订货号[：:]\s*([A-Z0-9]+)", price_text)
-        if sku_match:
-            sku = sku_match.group(1)
-        if not sku and url:
-            # Extract from URL: /product-XXXXX
-            url_match = re.search(r"/product-([A-Z0-9]+)", url)
-            if url_match:
-                sku = url_match.group(1)
+        # Brand from .product-parameter li.high-light
+        brand = None
+        brand_tag = card.select_one(".product-parameter li.high-light")
+        if brand_tag:
+            brand = brand_tag.get_text(strip=True)
 
-        # Delivery estimate
+        # Delivery
         delivery = None
-        delivery_match = re.search(r"预计出货[日期：:\s]*([\d\-~]+\s*个?工作日?)", price_text)
-        if delivery_match:
-            delivery = delivery_match.group(1).strip()
+        stock_tag = card.select_one("i[class*='today'], i[class*='product-text']")
+        if stock_tag:
+            delivery = stock_tag.get_text(strip=True)
 
         return {
-            "name": name[:80],
+            "name": name[:100],
+            "brand": brand,
             "price": price,
             "unit": unit,
             "sku": sku,
