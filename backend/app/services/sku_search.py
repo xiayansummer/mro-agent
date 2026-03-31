@@ -45,49 +45,100 @@ async def attach_files(session: AsyncSession, sku_results: list[dict]) -> list[d
     return sku_results
 
 
+import re as _re
+
+
+def _looks_like_model_number(s: str) -> bool:
+    """Heuristic: mixed letters+digits, ≥5 chars → likely a machine/equipment model number."""
+    return bool(
+        _re.match(r'^[A-Za-z0-9\-_.]{5,}$', s)
+        and _re.search(r'[A-Za-z]', s)
+        and _re.search(r'[0-9]', s)
+    )
+
+
 async def search_skus(session: AsyncSession, parsed_intent: dict, limit: int = 20) -> list[dict]:
-    conditions = []
     params = {}
 
-    # Category filters
+    # Category filters (always AND-ed)
+    cat_conditions = []
     for i, key in enumerate(["l1_category", "l2_category", "l3_category", "l4_category"]):
         col = f"{key}_name"
         value = parsed_intent.get(key)
         if value:
-            conditions.append(f"{col} LIKE :cat_{i}")
+            cat_conditions.append(f"{col} LIKE :cat_{i}")
             params[f"cat_{i}"] = f"%{value}%"
 
     # Keyword matching on item_name — ANY keyword must match (OR), not all (AND).
-    # e.g. keywords=["六角头螺栓","螺栓"] → item_name contains "六角头螺栓" OR "螺栓"
-    # This prevents over-strict filtering when the LLM emits category-level phrases
-    # (like "六角头螺栓") that differ from actual DB item names ("外六角螺栓").
     keywords = parsed_intent.get("keywords", [])
+    kw_clause = ""
     if keywords:
         kw_clauses = [f"item_name LIKE :kw_{i}" for i in range(len(keywords))]
-        conditions.append(f"({' OR '.join(kw_clauses)})")
+        kw_clause = f"({' OR '.join(kw_clauses)})"
         for i, kw in enumerate(keywords):
             params[f"kw_{i}"] = f"%{kw}%"
 
-    # Spec keywords match across item_name, specification, mfg_sku, and attribute_details.
-    # mfg_sku often encodes standard+spec (e.g. "DIN931 M8X40 A4-70") and must be searched.
+    # Spec keywords: split into model numbers (mfg_sku only) vs regular specs (all fields).
+    # Model numbers (e.g. MFB381125) match mfg_sku ALONE — they don't require item_name match.
+    # Regular specs (e.g. M8, DIN931, 304) are AND-ed with keyword filter as before.
     spec_keywords = parsed_intent.get("spec_keywords", [])
-    for i, sk in enumerate(spec_keywords):
-        conditions.append(
+    model_numbers = [sk for sk in spec_keywords if _looks_like_model_number(sk)]
+    regular_specs = [sk for sk in spec_keywords if not _looks_like_model_number(sk)]
+
+    regular_spec_clauses = []
+    for i, sk in enumerate(regular_specs):
+        regular_spec_clauses.append(
             f"(item_name LIKE :sk_{i} OR specification LIKE :sk_{i}"
             f" OR mfg_sku LIKE :sk_{i} OR attribute_details LIKE :sk_{i})"
         )
         params[f"sk_{i}"] = f"%{sk}%"
 
+    model_clauses = []
+    for i, mn in enumerate(model_numbers):
+        model_clauses.append(f"mfg_sku LIKE :mn_{i}")
+        params[f"mn_{i}"] = f"%{mn}%"
+
     # Brand filter
     brand = parsed_intent.get("brand")
+    brand_clause = ""
     if brand:
-        conditions.append("brand_name LIKE :brand")
+        brand_clause = "brand_name LIKE :brand"
         params["brand"] = f"%{brand}%"
 
-    if not conditions:
+    # Build WHERE clause:
+    # Standard path: cat_filters AND kw_filter AND regular_spec_filters AND brand_filter
+    # Compatibility path: cat_filters AND mfg_sku_model_filter (no kw_filter required)
+    # Result: cat_filters AND (standard_path OR compat_path)
+
+    standard_parts = []
+    if kw_clause:
+        standard_parts.append(kw_clause)
+    standard_parts.extend(regular_spec_clauses)
+    if brand_clause:
+        standard_parts.append(brand_clause)
+
+    if model_clauses:
+        # Compatibility search: mfg_sku match alone is sufficient (bypasses keyword filter)
+        compat_condition = f"({' OR '.join(model_clauses)})"
+        if standard_parts:
+            standard_condition = " AND ".join(standard_parts)
+            main_condition = f"(({standard_condition}) OR {compat_condition})"
+        else:
+            main_condition = compat_condition
+    else:
+        if standard_parts:
+            main_condition = " AND ".join(standard_parts)
+        else:
+            main_condition = ""
+
+    all_conditions = cat_conditions[:]
+    if main_condition:
+        all_conditions.append(main_condition)
+
+    if not all_conditions:
         return []
 
-    where_clause = " AND ".join(conditions)
+    where_clause = " AND ".join(all_conditions)
     query = f"""
         SELECT item_code, item_name, brand_name, specification, mfg_sku,
                l1_category_name, l2_category_name, l3_category_name, l4_category_name,

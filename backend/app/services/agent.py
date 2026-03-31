@@ -80,18 +80,12 @@ async def handle_message(
     search_limit = _limit_map.get(query_type, 10)
 
     # Build competitor query from keywords
-    # Exclude machine/equipment model numbers from competitor search — they are compatibility
-    # identifiers (matched against mfg_sku in our DB) and cause wrong results on 西域
-    import re as _re
-    def _is_model_number(s: str) -> bool:
-        """Heuristic: mixed letters+digits ≥6 chars with no spaces → likely a machine model."""
-        return bool(_re.match(r'^[A-Za-z0-9\-_.]{5,}$', s) and _re.search(r'[A-Za-z]', s) and _re.search(r'[0-9]', s))
-
+    # Exclude machine/equipment model numbers — they cause 西域 to return the machine itself
+    from app.services.sku_search import _looks_like_model_number
     kw_list = parsed.get("keywords") or []
     spec_kw = parsed.get("spec_keywords") or []
     brand_kw = parsed.get("brand") or ""
-    # Use only keywords + short/standard spec keywords; drop model numbers
-    competitor_spec = [s for s in spec_kw if not _is_model_number(s)]
+    competitor_spec = [s for s in spec_kw if not _looks_like_model_number(s)]
     competitor_query = " ".join(kw_list + competitor_spec + ([brand_kw] if brand_kw else []))
 
     async with AsyncSessionLocal() as db_session:
