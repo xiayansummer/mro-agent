@@ -105,11 +105,37 @@ async def search_skus(session: AsyncSession, parsed_intent: dict, limit: int = 2
         brand_clause = "brand_name LIKE :brand"
         params["brand"] = f"%{brand}%"
 
-    # Build WHERE clause:
-    # Standard path: cat_filters AND kw_filter AND regular_spec_filters AND brand_filter
-    # Compatibility path: cat_filters AND mfg_sku_model_filter (no kw_filter required)
-    # Result: cat_filters AND (standard_path OR compat_path)
+    # When model numbers are present, run a dedicated compatibility search first.
+    # This guarantees model-matched products appear at the top of results,
+    # regardless of how many other products match the standard keyword filters.
+    compat_results = []
+    seen_codes: set[str] = set()
 
+    if model_clauses:
+        compat_parts = list(cat_conditions)  # respect category filters
+        compat_parts.append(f"({' OR '.join(model_clauses)})")
+        compat_query = f"""
+            SELECT item_code, item_name, brand_name, specification, mfg_sku,
+                   l1_category_name, l2_category_name, l3_category_name, l4_category_name,
+                   attribute_details
+            FROM t_item_sample
+            WHERE {' AND '.join(compat_parts)}
+            LIMIT :limit
+        """
+        compat_params = {k: v for k, v in params.items()}
+        compat_params["limit"] = limit
+        compat_result = await session.execute(text(compat_query), compat_params)
+        for row in compat_result.fetchall():
+            compat_results.append({
+                "item_code": row[0], "item_name": row[1], "brand_name": row[2],
+                "specification": row[3], "mfg_sku": row[4],
+                "l1_category_name": row[5], "l2_category_name": row[6],
+                "l3_category_name": row[7], "l4_category_name": row[8],
+                "attribute_details": row[9],
+            })
+            seen_codes.add(row[0])
+
+    # Standard search (keyword + regular specs + categories)
     standard_parts = []
     if kw_clause:
         standard_parts.append(kw_clause)
@@ -117,56 +143,39 @@ async def search_skus(session: AsyncSession, parsed_intent: dict, limit: int = 2
     if brand_clause:
         standard_parts.append(brand_clause)
 
-    if model_clauses:
-        # Compatibility search: mfg_sku match alone is sufficient (bypasses keyword filter)
-        compat_condition = f"({' OR '.join(model_clauses)})"
-        if standard_parts:
-            standard_condition = " AND ".join(standard_parts)
-            main_condition = f"(({standard_condition}) OR {compat_condition})"
-        else:
-            main_condition = compat_condition
-    else:
-        if standard_parts:
-            main_condition = " AND ".join(standard_parts)
-        else:
-            main_condition = ""
-
     all_conditions = cat_conditions[:]
-    if main_condition:
-        all_conditions.append(main_condition)
+    if standard_parts:
+        all_conditions.append(" AND ".join(standard_parts))
 
-    if not all_conditions:
+    if not all_conditions and not compat_results:
         return []
 
-    where_clause = " AND ".join(all_conditions)
-    query = f"""
-        SELECT item_code, item_name, brand_name, specification, mfg_sku,
-               l1_category_name, l2_category_name, l3_category_name, l4_category_name,
-               attribute_details
-        FROM t_item_sample
-        WHERE {where_clause}
-        LIMIT :limit
-    """
-    params["limit"] = limit
+    standard_results = []
+    remaining = limit - len(compat_results)
+    if all_conditions and remaining > 0:
+        where_clause = " AND ".join(all_conditions)
+        params["limit"] = remaining
+        query = f"""
+            SELECT item_code, item_name, brand_name, specification, mfg_sku,
+                   l1_category_name, l2_category_name, l3_category_name, l4_category_name,
+                   attribute_details
+            FROM t_item_sample
+            WHERE {where_clause}
+            LIMIT :limit
+        """
+        result = await session.execute(text(query), params)
+        for row in result.fetchall():
+            if row[0] not in seen_codes:
+                standard_results.append({
+                    "item_code": row[0], "item_name": row[1], "brand_name": row[2],
+                    "specification": row[3], "mfg_sku": row[4],
+                    "l1_category_name": row[5], "l2_category_name": row[6],
+                    "l3_category_name": row[7], "l4_category_name": row[8],
+                    "attribute_details": row[9],
+                })
 
-    result = await session.execute(text(query), params)
-    rows = result.fetchall()
-
-    return [
-        {
-            "item_code": row[0],
-            "item_name": row[1],
-            "brand_name": row[2],
-            "specification": row[3],
-            "mfg_sku": row[4],
-            "l1_category_name": row[5],
-            "l2_category_name": row[6],
-            "l3_category_name": row[7],
-            "l4_category_name": row[8],
-            "attribute_details": row[9],
-        }
-        for row in rows
-    ]
+    # Compat results first (model-matched), then standard results
+    return compat_results + standard_results
 
 
 async def relaxed_search(session: AsyncSession, parsed_intent: dict, limit: int = 20) -> list[dict]:
