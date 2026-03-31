@@ -61,13 +61,16 @@ async def search_skus(session: AsyncSession, parsed_intent: dict, limit: int = 2
     params = {}
 
     # Category filters (always AND-ed)
+    # Normalize spaces on both sides to handle LLM adding spaces in Chinese terms
+    # e.g. intent parser outputs "O 型圈" but DB stores "O型圈"
     cat_conditions = []
     for i, key in enumerate(["l1_category", "l2_category", "l3_category", "l4_category"]):
         col = f"{key}_name"
         value = parsed_intent.get(key)
         if value:
-            cat_conditions.append(f"{col} LIKE :cat_{i}")
-            params[f"cat_{i}"] = f"%{value}%"
+            normalized = value.replace(" ", "")
+            cat_conditions.append(f"REPLACE({col}, ' ', '') LIKE :cat_{i}")
+            params[f"cat_{i}"] = f"%{normalized}%"
 
     # Keyword matching on item_name — ANY keyword must match (OR), not all (AND).
     keywords = parsed_intent.get("keywords", [])
