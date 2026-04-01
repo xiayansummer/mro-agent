@@ -73,13 +73,14 @@ async def search_skus(session: AsyncSession, parsed_intent: dict, limit: int = 2
             params[f"cat_{i}"] = f"%{normalized}%"
 
     # Keyword matching on item_name — ANY keyword must match (OR), not all (AND).
+    # Normalize spaces so "O 型圈" matches "O型圈" in item_name.
     keywords = parsed_intent.get("keywords", [])
     kw_clause = ""
     if keywords:
-        kw_clauses = [f"item_name LIKE :kw_{i}" for i in range(len(keywords))]
+        kw_clauses = [f"REPLACE(item_name, ' ', '') LIKE :kw_{i}" for i in range(len(keywords))]
         kw_clause = f"({' OR '.join(kw_clauses)})"
         for i, kw in enumerate(keywords):
-            params[f"kw_{i}"] = f"%{kw}%"
+            params[f"kw_{i}"] = f"%{kw.replace(' ', '')}%"
 
     # Spec keywords: split into model numbers (mfg_sku only) vs regular specs (all fields).
     # Model numbers (e.g. MFB381125) match mfg_sku ALONE — they don't require item_name match.
