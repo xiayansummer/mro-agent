@@ -36,6 +36,7 @@ export interface ChatMessage {
   skuResults?: SkuItem[];
   competitorResults?: CompetitorItem[];
   isStreaming?: boolean;
+  thinkingStatus?: string;
 }
 
 export interface ChatSession {

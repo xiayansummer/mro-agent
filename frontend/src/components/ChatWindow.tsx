@@ -88,10 +88,15 @@ export default function ChatWindow({ sessionId, messages, onMessagesChange, onTo
           );
           updateMessages(next);
         },
-        onThinking: () => {},
+        onThinking: (status) => {
+          const next = messagesRef.current.map((m) =>
+            m.id === assistantMsgId && m.content === "" ? { ...m, thinkingStatus: status } : m
+          );
+          updateMessages(next);
+        },
         onDone: () => {
           const next = messagesRef.current.map((m) =>
-            m.id === assistantMsgId ? { ...m, isStreaming: false } : m
+            m.id === assistantMsgId ? { ...m, isStreaming: false, thinkingStatus: undefined } : m
           );
           updateMessages(next);
           setIsLoading(false);
