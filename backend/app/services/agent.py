@@ -151,7 +151,8 @@ async def handle_message(
     application_no_results = query_type == "application" and not results
 
     # Step 3: Send SKU results (skip for guided/no-results application)
-    if results and not is_guided:
+    # Skip original results if equivalent results were already sent to avoid duplicate sku_results events
+    if results and not is_guided and not equivalent_results:
         sku_data = json.dumps(results, ensure_ascii=False, default=str)
         yield f"event: sku_results\ndata: {sku_data}\n\n"
 

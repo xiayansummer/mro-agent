@@ -48,8 +48,19 @@ async def attach_files(session: AsyncSession, sku_results: list[dict]) -> list[d
 import re as _re
 
 
+_STANDARD_PREFIXES = _re.compile(
+    r'^(DIN|ISO|GB|JIS|ASTM|ANSI|BS|NF|UNI|UNE|SS|EN|AS|CSA|SAE|ASME)\d',
+    _re.IGNORECASE,
+)
+
+
 def _looks_like_model_number(s: str) -> bool:
-    """Heuristic: mixed letters+digits, ≥5 chars → likely a machine/equipment model number."""
+    """Heuristic: mixed letters+digits, ≥5 chars → likely a machine/equipment model number.
+    Explicitly excludes international standard numbers (DIN931, ISO4762, GB5782, etc.)
+    which should be searched in specification/attribute_details, not mfg_sku only.
+    """
+    if _STANDARD_PREFIXES.match(s):
+        return False
     return bool(
         _re.match(r'^[A-Za-z0-9\-_.]{5,}$', s)
         and _re.search(r'[A-Za-z]', s)
