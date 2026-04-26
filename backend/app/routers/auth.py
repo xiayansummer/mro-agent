@@ -79,12 +79,13 @@ def _parse_bearer(auth_header: Optional[str]) -> Optional[str]:
     return None
 
 
-# Re-usable dependency for other routers — returns user_id (str) or None for anonymous
-async def get_current_user_id(authorization: Optional[str] = Header(None)) -> Optional[str]:
+# Required-auth dependency: raises 401 if not logged in.
+# Anonymous access is no longer supported — all business endpoints must use this.
+async def require_user_id(authorization: Optional[str] = Header(None)) -> str:
     token = _parse_bearer(authorization)
     if not token:
-        return None
+        raise HTTPException(status_code=401, detail="请先登录")
     user = await user_service.get_user_by_token(token)
     if not user:
-        return None
+        raise HTTPException(status_code=401, detail="登录已失效，请重新登录")
     return user_service.user_to_external_id(user)

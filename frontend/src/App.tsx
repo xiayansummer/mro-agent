@@ -73,7 +73,6 @@ export default function App() {
   const [activeView, setActiveView] = useState<"chat" | "inquiry">("chat");
 
   const [user, setUser] = useState<AuthUser | null>(() => getStoredUser());
-  const [authOpen, setAuthOpen] = useState(false);
 
   // Validate token against server on mount; clears stale tokens automatically
   useEffect(() => {
@@ -81,6 +80,16 @@ export default function App() {
       fetchMe().then(u => setUser(u)).catch(() => setUser(null));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Global 401 listener — any auth-failed API call kicks user back to login
+  useEffect(() => {
+    const onUnauthorized = () => {
+      doLogout();
+      setUser(null);
+    };
+    window.addEventListener("mro:unauthorized", onUnauthorized);
+    return () => window.removeEventListener("mro:unauthorized", onUnauthorized);
   }, []);
 
   const handleLogout = useCallback(() => {
@@ -182,7 +191,6 @@ export default function App() {
         onDeleteChat={handleDeleteChat}
         onClose={handleCloseSidebar}
         onNavigate={setActiveView}
-        onOpenAuth={() => setAuthOpen(true)}
         onLogout={handleLogout}
       />
       {activeView === "inquiry" ? (
@@ -197,9 +205,9 @@ export default function App() {
         />
       )}
 
+      {/* Mandatory login modal — onClose omitted so it cannot be dismissed */}
       <AuthModal
-        open={authOpen}
-        onClose={() => setAuthOpen(false)}
+        open={!user}
         onSuccess={(u) => setUser(u)}
       />
     </div>

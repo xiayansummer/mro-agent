@@ -4,7 +4,7 @@ import { register, login } from "../services/auth";
 
 interface Props {
   open: boolean;
-  onClose: () => void;
+  onClose?: () => void;          // optional — when undefined, modal cannot be dismissed
   onSuccess: (user: AuthUser) => void;
 }
 
@@ -36,7 +36,7 @@ export default function AuthModal({ open, onClose, onSuccess }: Props) {
         ? await register(phone, nickname.trim() || null, inviteToken.trim())
         : await login(phone);
       onSuccess(user);
-      onClose();
+      onClose?.();
     } catch (e: any) {
       setError(e?.message || "操作失败");
     } finally {
@@ -52,7 +52,7 @@ export default function AuthModal({ open, onClose, onSuccess }: Props) {
         display: "flex", alignItems: "center", justifyContent: "center",
         padding: 16,
       }}
-      onClick={onClose}
+      onClick={onClose}     /* no-op when onClose is undefined (mandatory mode) */
     >
       <div
         onClick={e => e.stopPropagation()}

@@ -55,6 +55,11 @@ export async function sendMessage(
   });
 
   if (!response.ok) {
+    if (response.status === 401) {
+      window.dispatchEvent(new Event("mro:unauthorized"));
+      callbacks.onError("登录已失效，请重新登录");
+      return;
+    }
     callbacks.onError(`请求失败: ${response.status}`);
     return;
   }

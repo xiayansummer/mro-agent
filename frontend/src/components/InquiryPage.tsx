@@ -116,6 +116,10 @@ export default function InquiryPage({ onToggleSidebar }: { onToggleSidebar?: () 
     form.append("file", file);
     try {
       const res = await fetch("/api/inquiry/upload", { method: "POST", body: form, headers: authHeader() });
+      if (res.status === 401) {
+        window.dispatchEvent(new Event("mro:unauthorized"));
+        throw new Error("登录已失效，请重新登录");
+      }
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.detail || `请求失败 ${res.status}`);

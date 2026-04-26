@@ -11,10 +11,11 @@ from typing import Optional
 
 import openpyxl
 import xlrd
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
 from app.db.mysql import AsyncSessionLocal
+from app.routers.auth import require_user_id
 from app.services.sku_search import search_skus, relaxed_search
 
 router = APIRouter()
@@ -130,7 +131,10 @@ async def search_one_row(db_session, row: dict, idx: int) -> dict:
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.post("/inquiry/upload")
-async def upload_inquiry(file: UploadFile = File(...)):
+async def upload_inquiry(
+    file: UploadFile = File(...),
+    user_id: str = Depends(require_user_id),  # noqa: ARG001 — auth gate, value not used
+):
     content = await file.read()
     if len(content) > 5 * 1024 * 1024:  # 5MB limit
         raise HTTPException(status_code=400, detail="文件过大，请控制在 5MB 以内")

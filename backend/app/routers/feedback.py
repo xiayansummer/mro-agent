@@ -7,7 +7,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from app.routers.auth import get_current_user_id
+from app.routers.auth import require_user_id
 from app.services.memory_service import memory_service
 
 router = APIRouter()
@@ -15,7 +15,6 @@ router = APIRouter()
 
 class FeedbackRequest(BaseModel):
     session_id: str
-    user_id: Optional[str] = None
     action: str              # "liked" | "disliked"
     item_code: str
     item_name: str
@@ -28,9 +27,8 @@ class FeedbackRequest(BaseModel):
 @router.post("/feedback")
 async def submit_feedback(
     req: FeedbackRequest,
-    auth_user_id: Optional[str] = Depends(get_current_user_id),
+    user_id: str = Depends(require_user_id),
 ):
-    user_id = auth_user_id or req.user_id or req.session_id
     if req.action not in ("liked", "disliked"):
         return {"ok": False, "error": "action must be liked or disliked"}
 

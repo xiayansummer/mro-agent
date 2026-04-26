@@ -13,7 +13,6 @@ interface Props {
   onDeleteChat: (id: string) => void;
   onClose: () => void;
   onNavigate: (view: "chat" | "inquiry") => void;
-  onOpenAuth: () => void;
   onLogout: () => void;
 }
 
@@ -32,7 +31,7 @@ function formatRelativeTime(timestamp: number): string {
 
 export default function Sidebar({
   sessions, activeId, isOpen, activeView, user,
-  onNewChat, onSelectChat, onDeleteChat, onClose, onNavigate, onOpenAuth, onLogout,
+  onNewChat, onSelectChat, onDeleteChat, onClose, onNavigate, onLogout,
 }: Props) {
   const sorted = [...sessions].sort((a, b) => b.createdAt - a.createdAt);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
@@ -58,6 +57,11 @@ export default function Sidebar({
 
     try {
       const res = await fetch("/api/profile/import", { method: "POST", body: form, headers: authHeader() });
+      if (res.status === 401) {
+        window.dispatchEvent(new Event("mro:unauthorized"));
+        setImportStatus("✗ 登录已失效，请重新登录");
+        return;
+      }
       const data = await res.json();
       if (res.ok) {
         setImportStatus(`✓ 已导入 ${data.total_records} 条记录`);
@@ -275,8 +279,8 @@ export default function Sidebar({
 
         {/* Footer */}
         <div style={{ borderTop: "1px solid var(--sidebar-border)", padding: "12px 16px" }} className="shrink-0">
-          {/* User section */}
-          {user ? (
+          {/* User section — always present once logged in (mandatory login means user is never null here in practice) */}
+          {user && (
             <div style={{
               display: "flex", alignItems: "center", gap: 8,
               padding: "8px 10px", marginBottom: 10,
@@ -308,21 +312,6 @@ export default function Sidebar({
                 </svg>
               </button>
             </div>
-          ) : (
-            <button
-              onClick={onOpenAuth}
-              style={{
-                width: "100%", padding: "8px 10px", marginBottom: 10,
-                background: "var(--accent)", color: "#fff",
-                border: "none", borderRadius: 6, fontSize: 12, fontWeight: 500,
-                cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-              }}
-            >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-              </svg>
-              登录 / 注册
-            </button>
           )}
 
           <input

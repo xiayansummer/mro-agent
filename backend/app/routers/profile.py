@@ -3,11 +3,10 @@
 POST /api/profile/import  — 上传采购历史 Excel/CSV，写入 #preference memo
 """
 import logging
-from typing import Optional
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile, HTTPException
+from fastapi import APIRouter, Depends, File, UploadFile, HTTPException
 
-from app.routers.auth import get_current_user_id
+from app.routers.auth import require_user_id
 from app.services.erp_importer import parse_rows, aggregate_erp_data
 from app.services.memory_service import memory_service, _uid_tag
 
@@ -18,14 +17,9 @@ router = APIRouter()
 @router.post("/profile/import")
 async def import_erp_history(
     file: UploadFile = File(...),
-    user_id: Optional[str] = Form(None),
-    session_id: Optional[str] = Form(None),
-    auth_user_id: Optional[str] = Depends(get_current_user_id),
+    user_id: str = Depends(require_user_id),
 ):
-    effective_uid = auth_user_id or user_id or session_id
-    if not effective_uid:
-        raise HTTPException(status_code=400, detail="需要提供 user_id 或 session_id")
-
+    effective_uid = user_id
     filename = file.filename or ""
     if not any(filename.lower().endswith(ext) for ext in (".xlsx", ".xls", ".csv")):
         raise HTTPException(status_code=400, detail="仅支持 .xlsx / .xls / .csv 格式")
