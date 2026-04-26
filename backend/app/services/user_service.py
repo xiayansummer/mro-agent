@@ -81,3 +81,32 @@ async def login_user(phone: str) -> Optional[dict]:
 def user_to_external_id(user: dict) -> str:
     """Stable id used downstream as user_id (memory keys, etc.)."""
     return f"u{user['id']}"
+
+
+def _external_id_to_db_id(external_user_id: str) -> Optional[int]:
+    """Reverse of user_to_external_id. Returns None for non-user ids (e.g. legacy session ids)."""
+    if not external_user_id or not external_user_id.startswith("u"):
+        return None
+    try:
+        return int(external_user_id[1:])
+    except ValueError:
+        return None
+
+
+async def increment_session_count(external_user_id: str) -> Optional[int]:
+    """
+    Atomically +1 on session_count and return the new value.
+    Returns None if user_id doesn't map to a real t_user row.
+    """
+    db_id = _external_id_to_db_id(external_user_id)
+    if db_id is None:
+        return None
+    async with AsyncSessionLocal() as s:
+        await s.execute(
+            text("UPDATE t_user SET session_count = session_count + 1 WHERE id = :id"),
+            {"id": db_id},
+        )
+        await s.commit()
+        r = await s.execute(text("SELECT session_count FROM t_user WHERE id = :id"), {"id": db_id})
+        row = r.fetchone()
+        return row[0] if row else None

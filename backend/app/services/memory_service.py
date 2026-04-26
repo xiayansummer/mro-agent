@@ -18,12 +18,9 @@ from typing import Optional
 import httpx
 
 from app.config import settings
+from app.services import user_service
 
 logger = logging.getLogger(__name__)
-
-
-# 轻量级内存会话计数器（重启后重置，仅用于触发偏好摘要更新）
-_session_counts: dict[str, int] = {}
 
 
 class MemoryService:
@@ -214,11 +211,15 @@ class MemoryService:
         except Exception as e:
             logger.error(f"Memos: save_session_summary exception: {e}", exc_info=True)
 
-        # 每累计 10 次会话触发偏好摘要更新（fire-and-forget）
-        _session_counts[uid_tag] = _session_counts.get(uid_tag, 0) + 1
-        if _session_counts[uid_tag] % 10 == 0:
-            logger.info(f"Memos: triggering preference memo update for user {user_id[:8]}")
-            asyncio.ensure_future(self.update_preference_memo(user_id))
+        # 每累计 10 次会话触发偏好摘要更新（fire-and-forget）。
+        # 计数器持久化在 t_user.session_count，重启不丢失。
+        try:
+            new_count = await user_service.increment_session_count(user_id)
+            if new_count is not None and new_count % 10 == 0:
+                logger.info(f"Memos: triggering preference memo update for user {user_id[:8]} (session #{new_count})")
+                asyncio.ensure_future(self.update_preference_memo(user_id))
+        except Exception as e:
+            logger.error(f"Memos: increment_session_count failed: {e}")
 
     # ── Public: High-level write (feedback) ───────────────────────────────
 
