@@ -1,8 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { ChatSession, ChatMessage } from "./types";
+import { ChatSession, ChatMessage, AuthUser } from "./types";
 import ChatWindow from "./components/ChatWindow";
 import Sidebar from "./components/Sidebar";
 import InquiryPage from "./components/InquiryPage";
+import AuthModal from "./components/AuthModal";
+import { fetchMe, getStoredUser, logout as doLogout } from "./services/auth";
 
 const STORAGE_KEY = "mro-chat-sessions";
 const MAX_SESSIONS = 50;
@@ -69,6 +71,22 @@ export default function App() {
   );
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [activeView, setActiveView] = useState<"chat" | "inquiry">("chat");
+
+  const [user, setUser] = useState<AuthUser | null>(() => getStoredUser());
+  const [authOpen, setAuthOpen] = useState(false);
+
+  // Validate token against server on mount; clears stale tokens automatically
+  useEffect(() => {
+    if (user) {
+      fetchMe().then(u => setUser(u)).catch(() => setUser(null));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleLogout = useCallback(() => {
+    doLogout();
+    setUser(null);
+  }, []);
 
   // Debounced localStorage persistence
   const saveTimerRef = useRef<ReturnType<typeof setTimeout>>();
@@ -158,11 +176,14 @@ export default function App() {
         activeId={activeId}
         isOpen={sidebarOpen}
         activeView={activeView}
+        user={user}
         onNewChat={handleNewChat}
         onSelectChat={(id) => { handleSelectChat(id); setActiveView("chat"); }}
         onDeleteChat={handleDeleteChat}
         onClose={handleCloseSidebar}
         onNavigate={setActiveView}
+        onOpenAuth={() => setAuthOpen(true)}
+        onLogout={handleLogout}
       />
       {activeView === "inquiry" ? (
         <InquiryPage onToggleSidebar={handleToggleSidebar} />
@@ -175,6 +196,12 @@ export default function App() {
           onToggleSidebar={handleToggleSidebar}
         />
       )}
+
+      <AuthModal
+        open={authOpen}
+        onClose={() => setAuthOpen(false)}
+        onSuccess={(u) => setUser(u)}
+      />
     </div>
   );
 }

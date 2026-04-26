@@ -1,4 +1,5 @@
 import { SkuItem, CompetitorItem } from "../types";
+import { authHeader } from "./auth";
 
 export async function submitFeedback(
   sessionId: string,
@@ -8,7 +9,7 @@ export async function submitFeedback(
   try {
     await fetch(`${API_BASE}/feedback`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeader() },
       body: JSON.stringify({
         session_id: sessionId,
         action,
@@ -48,7 +49,7 @@ export async function sendMessage(
 
   const response = await fetch(`${API_BASE}/chat`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeader() },
     body: JSON.stringify(body),
     signal,
   });

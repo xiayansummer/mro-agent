@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from "react";
+import { authHeader } from "../services/auth";
 
 interface InquiryRow {
   index: number;
@@ -114,7 +115,7 @@ export default function InquiryPage({ onToggleSidebar }: { onToggleSidebar?: () 
     const form = new FormData();
     form.append("file", file);
     try {
-      const res = await fetch("/api/inquiry/upload", { method: "POST", body: form });
+      const res = await fetch("/api/inquiry/upload", { method: "POST", body: form, headers: authHeader() });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.detail || `请求失败 ${res.status}`);

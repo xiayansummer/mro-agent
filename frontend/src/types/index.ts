@@ -45,3 +45,11 @@ export interface ChatSession {
   messages: ChatMessage[];
   createdAt: number;
 }
+
+export interface AuthUser {
+  id: number;
+  phone: string;
+  nickname: string | null;
+  user_id: string;     // external id used as user_id in chat/feedback requests
+  auth_token: string;
+}

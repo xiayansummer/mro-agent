@@ -1,16 +1,20 @@
 import { useState, useRef } from "react";
-import { ChatSession } from "../types";
+import { ChatSession, AuthUser } from "../types";
+import { authHeader } from "../services/auth";
 
 interface Props {
   sessions: ChatSession[];
   activeId: string;
   isOpen: boolean;
   activeView: "chat" | "inquiry";
+  user: AuthUser | null;
   onNewChat: () => void;
   onSelectChat: (id: string) => void;
   onDeleteChat: (id: string) => void;
   onClose: () => void;
   onNavigate: (view: "chat" | "inquiry") => void;
+  onOpenAuth: () => void;
+  onLogout: () => void;
 }
 
 function formatRelativeTime(timestamp: number): string {
@@ -27,7 +31,8 @@ function formatRelativeTime(timestamp: number): string {
 }
 
 export default function Sidebar({
-  sessions, activeId, isOpen, activeView, onNewChat, onSelectChat, onDeleteChat, onClose, onNavigate,
+  sessions, activeId, isOpen, activeView, user,
+  onNewChat, onSelectChat, onDeleteChat, onClose, onNavigate, onOpenAuth, onLogout,
 }: Props) {
   const sorted = [...sessions].sort((a, b) => b.createdAt - a.createdAt);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
@@ -52,7 +57,7 @@ export default function Sidebar({
     form.append("session_id", sessionId);
 
     try {
-      const res = await fetch("/api/profile/import", { method: "POST", body: form });
+      const res = await fetch("/api/profile/import", { method: "POST", body: form, headers: authHeader() });
       const data = await res.json();
       if (res.ok) {
         setImportStatus(`✓ 已导入 ${data.total_records} 条记录`);
@@ -270,6 +275,56 @@ export default function Sidebar({
 
         {/* Footer */}
         <div style={{ borderTop: "1px solid var(--sidebar-border)", padding: "12px 16px" }} className="shrink-0">
+          {/* User section */}
+          {user ? (
+            <div style={{
+              display: "flex", alignItems: "center", gap: 8,
+              padding: "8px 10px", marginBottom: 10,
+              background: "var(--sidebar-active)", borderRadius: 6,
+            }}>
+              <div style={{
+                width: 24, height: 24, borderRadius: "50%",
+                background: "var(--accent)", color: "#fff",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 11, fontWeight: 600, flexShrink: 0,
+              }}>
+                {(user.nickname || user.phone.slice(-4))[0]?.toUpperCase() || "U"}
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ color: "#fff", fontSize: 12, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {user.nickname || `用户${user.phone.slice(-4)}`}
+                </div>
+                <div style={{ color: "#5b6478", fontSize: 10, fontFamily: "var(--mono)" }}>
+                  {user.phone.slice(0, 3)}****{user.phone.slice(-4)}
+                </div>
+              </div>
+              <button
+                onClick={onLogout}
+                title="退出登录"
+                style={{ background: "none", border: "none", color: "#5b6478", cursor: "pointer", padding: 4, borderRadius: 3, flexShrink: 0 }}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                </svg>
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={onOpenAuth}
+              style={{
+                width: "100%", padding: "8px 10px", marginBottom: 10,
+                background: "var(--accent)", color: "#fff",
+                border: "none", borderRadius: 6, fontSize: 12, fontWeight: 500,
+                cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+              }}
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+              </svg>
+              登录 / 注册
+            </button>
+          )}
+
           <input
             ref={fileInputRef}
             type="file"

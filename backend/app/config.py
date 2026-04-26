@@ -21,6 +21,9 @@ class Settings:
     MEMOS_USERNAME: str = os.getenv("MEMOS_USERNAME", "mro-admin")
     MEMOS_PASSWORD: str = os.getenv("MEMOS_PASSWORD", "mro-memory-2026")
 
+    # Invite token required for user registration. Empty = registration open (dev mode).
+    REGISTER_TOKEN: str = os.getenv("REGISTER_TOKEN", "")
+
     @property
     def database_url(self) -> str:
         return (
