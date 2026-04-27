@@ -340,6 +340,23 @@ export default function Sidebar({
               {importStatus}
             </div>
           )}
+          <a
+            href="/manual.pdf"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              width: "100%", background: "none", border: "1px solid var(--sidebar-border)",
+              borderRadius: 6, padding: "6px 10px", cursor: "pointer",
+              color: "var(--text-secondary)", fontSize: 11,
+              display: "flex", alignItems: "center", gap: 6, marginBottom: 8,
+              textDecoration: "none", boxSizing: "border-box",
+            }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.5M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5h.01" />
+            </svg>
+            使用帮助
+          </a>
           <div style={{ color: "#3a3f52", fontSize: 11, display: "flex", alignItems: "center", gap: 6 }}>
             <span style={{ fontFamily: "var(--mono)" }}>v1.0</span>
             <span style={{ color: "#2a2f40" }}>·</span>
