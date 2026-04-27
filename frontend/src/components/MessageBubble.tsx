@@ -137,7 +137,7 @@ export default function MessageBubble({ message, isFirst, sessionId }: Props) {
                 borderRadius: "50%",
                 background: "#f59e0b",
               }} />
-              西域竞品参考价 ({message.competitorResults.length} 条)
+              网络参考价 ({message.competitorResults.length} 条)
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               {message.competitorResults.map((item, i) => (
