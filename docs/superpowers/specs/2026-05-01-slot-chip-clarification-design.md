@@ -99,12 +99,14 @@
 字段说明：
 
 - `summary`: 自然语言完整句，每轮重新生成，累积消化所有已知信息
-- `known[]`: 当前轮已抓取到的结构化字段，{label, value} 形式，长度不限
+- `known[]`: **整个对话上下文中已确认的所有参数累积**（不是仅本轮 user message），{label, value} 形式，长度不限
+  - intent_parser 接收到完整 chat history（已有机制），系统提示要求 LLM 把历史轮中确认过的参数都列在 known 里
+  - 切换品类的污染问题通过 prompt 规则解决：**"如果本轮 user message 提出与历史明确不同的新品类，丢弃旧品类的衍生参数"**
 - `missing[]`: 待补充维度，长度建议 2-4 个
   - `key`: LLM 自由命名（小写下划线 / 简短英文），用于内部追踪，不展示
   - `icon`: emoji，由 LLM 输出，提示词附带常用 icon 参考表
   - `question`: 中文问题
-  - `options`: 候选 chip 文本，3-5 个为佳
+  - `options`: 候选 chip 文本，3-5 个为佳。**纯品类/参数名，不带 (N) 等后缀** —— 数量后缀仅用于 brand-only fallback 的展示场景，且由前端解析剥离后再提交（详见 4.2）
 
 ### 4.2 Brand-only fallback 触发的 payload 形态
 
@@ -125,8 +127,10 @@
 }
 ```
 
-- option 文本里的 `(N)` 是商品数量后缀，纯展示
-- 用户点击提交后，下一轮 query 会被 LLM 重新解析为 brand="美和" + category="手拉葫芦"
+- option 文本里的 `(N)` 是商品数量后缀，**仅用于前端展示**
+- **前端在提交拼接前必须用正则 `/\s*\(\d+\)$/` 剥离尾部 `(N)` 后缀**，避免 LLM 把"8"误解析为数量/规格参数
+- 例：用户点 "手拉葫芦 (8)" → 实际提交文本为 "手拉葫芦"
+- 下一轮 LLM 重新解析为 brand="美和" + category="手拉葫芦"
 
 ### 4.3 前端 ChatMessage 类型扩展
 
@@ -188,9 +192,11 @@ interface ChatMessage {
 - **Chip 视觉态**：未选（灰底圆角，1px 边框）；已选（强调色边框 + 浅背景，下方 tag pill 镜像）
 - **同维度切换**：点维度内另一个 chip 即替换当前选中
 - **取消选中**：点已选 chip 切回未选；或点 tag pill 上 ✕
-- **自由文本**：独立 textarea，提交时与 tag pill 文本按空格拼接
+- **自由文本**：单行 input（不是 textarea），提交时与 tag pill 文本按空格拼接
+- **回车行为**：单行 input 中回车 = 直接提交（与主聊天输入框一致，不做换行支持）
 - **提交后**：卡片 freeze 进只读态（chip 不可点、输入框消失、tag pill 保留高亮）；新一轮回复作为下条 assistant 消息正常渲染
 - **绕过 chip**：用户在主聊天输入框直接打字发送，当前卡 freeze；后端按新 query 重新走流程
+- **chip 提交清洗**：拼接前对每个 tag pill 文本应用 `text.replace(/\s*\(\d+\)$/, '')` 剥离尾部 `(N)` 计数后缀（仅 brand-only fallback 场景出现）
 
 ### 5.3 提交流转
 
@@ -246,24 +252,35 @@ key 是 DB 标准品牌名（与 t_sku.brand_name 一致），value 数组是别
 
 key 是用户常用简写，value 是 DB 中的标准 L1/L2 名。
 
-### 6.3 intent_parser 改造点
+### 6.3 intent_parser 改造点（统一处理品牌 + 品类同义）
 
-- 增加 brand 解析后的归一化步骤：解析出的 brand 字符串先查 alias 表，命中即替换为标准名（用于下游 SKU search 精确匹配）
-- 系统提示新增一段：常见品牌别名（举例 5-8 个）让 LLM 在解析阶段尽量直接输出标准名
+**核心原则：归一化在 LLM 层完成，不做 raw query 字符串替换**（避免子串污染，如 "电动工具" 被错改成 "电动工具耗材"，"我要搬运车" 被错改成 "我要物料搬运车"）。
 
-### 6.4 agent.py 预处理
+具体做法：
 
-在调用 intent_parser 之前对 user_message 做 category 同义替换（仅顶层关键词）：
+1. **启动时加载** `brand_aliases.json` 和 `category_synonyms.json`，把内容渲染进 `intent_parser` 的 system prompt（参考示例段）：
 
-```python
-def normalize_query(msg: str) -> str:
-    for syn, std in category_synonyms.items():
-        if syn in msg and std not in msg:
-            msg = msg.replace(syn, std, 1)
-    return msg
-```
+   ```
+   常见品牌别名（请直接输出标准名）:
+   - 美和 ← TOHO / 美和TOHO / 东星
+   - NOK ← 耐欧凯 / 恩欧凯
+   - SKF ← 斯凯孚
+   - ...
 
-注意：单向替换，避免双向混淆。
+   常见品类同义（请直接归一到标准 L1/L2 名）:
+   - 搬运 / 搬运产品 → 物料搬运
+   - 起重 → 起重工具及设备
+   - ...
+   ```
+
+2. **后置 safety net 归一化（仅对 LLM 输出字段，不对原始 query）**：
+   - LLM 输出的 `brand` 字段：若仍非标准名，查 alias 表 exact match（大小写不敏感）→ 命中替换为标准名
+   - LLM 输出的 `l1_category` / `l2_category` 字段：若仍非标准名，查 synonym 表 exact match → 命中替换为标准名
+   - 整段查询字符串不做任何 replace，避免子串污染
+
+### 6.4 agent.py 不做 query 预处理
+
+**移除 `normalize_query` string-replace 设计** —— LLM 在 6.3 的 prompt 里已经能处理同义词。agent.py 仅在调用前确保 history 完整，不动 user_message 内容。
 
 ### 6.5 sku_search.py brand-only fallback 分支
 
@@ -317,17 +334,25 @@ async def search_skus(intent: dict) -> tuple[list[Sku], Optional[BrandFallback]]
 
 ## 8. 持久化
 
-`t_chat_message` 表新增列：
+`t_chat_message` 表新增列，**使用原生 JSON 类型**（MySQL 5.7+ 原生支持，所有现代部署都满足）：
 
 ```sql
 ALTER TABLE t_chat_message
-ADD COLUMN slot_clarification MEDIUMTEXT NULL
+ADD COLUMN slot_clarification JSON NULL
 AFTER competitor_results;
 ```
+
+为何 JSON 而非 MEDIUMTEXT：
+- 后续运营分析可直接 SQL 查询：`JSON_EXTRACT(slot_clarification, '$.missing[*].key')` 统计高频追问维度
+- `JSON_EXTRACT(slot_clarification, '$.known[*].label')` 分析用户最常确认的参数
+- brand fallback 频次：`WHERE JSON_EXTRACT(slot_clarification, '$.known[0].label') = '品牌'`
+- 不需要写 Python 脚本拉全量做清洗
 
 存储完整的 `SlotClarification` JSON（包含 selected / freeText / submitted 字段）。会话恢复时按 submitted=true 渲染只读卡片。
 
 迁移脚本: `backend/migrations/003_add_slot_clarification.sql`
+
+实施时验证 MySQL 版本：`SELECT VERSION();` 若 < 5.7 fallback MEDIUMTEXT。
 
 ---
 
@@ -351,9 +376,11 @@ if (message.slotClarification) {
 ```
 [user] 50pvc水管
     ↓
-[agent.py] normalize_query → intent_parser
+[agent.py] 不预处理 user_message，直接调 intent_parser（包含 history）
     ↓
-[intent_parser LLM] 输出 JSON 含 slot_clarification 字段
+[intent_parser LLM] 输出 JSON 含 slot_clarification + brand/category（已归一）
+    ↓
+[agent.py] safety net：brand/category 字段查 alias/synonym 表二次校验
     ↓
 [agent.py] SSE event=slot_clarification, data=<JSON>
     ↓
@@ -394,7 +421,9 @@ if (message.slotClarification) {
 | 品牌别名表覆盖不全 | 部分品牌仍搜不到 | 持续运营维护，从用户反馈中迭代；初期 cover 30 个常用品牌 |
 | 多轮 chip 用户疲劳 | 用户跳出 | 3 轮硬上限 + 每轮 missing 限制 2-4 个维度 |
 | 老消息 markdown 表格在新前端样式错位 | 历史会话视觉违和 | 前端隔离 CSS scope；保留对老 markdown 的渲染兼容 |
-| 同会话切换品类后 known 字段污染 | 错误延续上一品类的已知字段 | intent_parser 系统提示明确：known 仅基于本轮 user message，不沿用历史 |
+| 同会话切换品类后 known 字段污染 | 错误延续上一品类的已知字段 | intent_parser 系统提示规则：默认累积所有历史确认参数；**仅当用户明确提出与历史不同的新品类时，丢弃旧品类的衍生参数**（保留通用维度如品牌） |
+| 字符串预处理替换的子串污染 | "电动工具" 被错改成 "电动工具耗材"，"我要搬运车" 被错改成 "我要物料搬运车" | 完全移除 query 预处理 string-replace；归一化全部移到 LLM prompt + 字段级 safety net（详见 6.3/6.4） |
+| chip 选项 (N) 后缀污染 LLM 解析 | "8" 被解析成数量/规格 | 前端提交前用正则 `\s*\(\d+\)$` 剥离（详见 5.2） |
 
 ---
 
@@ -403,5 +432,9 @@ if (message.slotClarification) {
 - 基于 Memos 用户偏好自动预选 chip（如品牌偏好默认勾选）
 - 移动端 chip 横向滑动优化
 - chip 卡支持"跳过此项"按钮（用户明确不知道怎么填时）
-- 品类聚类的精确商品数量 API 化（不再拼在 option 文本里）
+- 品类聚类的精确商品数量从 option 文本拆出，改为独立 `option_counts: number[]` 平行数组（彻底消除 (N) 后缀污染风险）
 - 折叠式"分析推导过程"步骤条（如果 agent 流程变得多步）
+- **品牌别名 / 品类同义配置热更新**：当前 v1.2 把 `brand_aliases.json` 和 `category_synonyms.json` 放代码仓，新增同义词需发版。如果运营侧迭代频率上升，迁移到：
+  - 选项 a：放 redis，加一个简单后台编辑界面
+  - 选项 b：建 `t_brand_alias` / `t_category_synonym` 配置表，启动加载 + 文件 watch reload
+  - 决策时机：当一周内同义词变更超过 2 次，或运营提出 self-service 需求
