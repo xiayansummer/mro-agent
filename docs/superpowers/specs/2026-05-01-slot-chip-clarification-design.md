@@ -267,19 +267,36 @@ def normalize_query(msg: str) -> str:
 
 ### 6.5 sku_search.py brand-only fallback 分支
 
+**关键设计**：聚类查询必须直接走 SQL `GROUP BY`，**不能**先 `SELECT *` 再在内存里聚合 —— 大品牌（如美和可能有上万 SKU）的 LIMIT 截断会导致聚类严重失真（前 50 行可能集中在同一个 L3，遗漏品牌下其他核心品类）。
+
 ```python
 async def search_skus(intent: dict) -> tuple[list[Sku], Optional[BrandFallback]]:
     if intent["brand"] and not intent["l1_category"] and not intent["l2_category"]:
-        # Brand-only fallback
-        rows = await db.fetch(
-            "SELECT * FROM t_sku WHERE brand_name = %s LIMIT 50",
-            intent["brand"]
+        # Brand-only fallback：DB 端聚合，结果 100% 准确，性能也远优于全量加载
+        rows = await db.fetch_all(
+            """
+            SELECT l3_category_name, COUNT(*) as cnt
+            FROM t_sku
+            WHERE brand_name = %s
+              AND l3_category_name IS NOT NULL
+            GROUP BY l3_category_name
+            ORDER BY cnt DESC
+            LIMIT 10
+            """,
+            intent["brand"],
         )
         if rows:
-            clusters = group_by_l3(rows)  # {l3_name: count}
+            clusters = [(r["l3_category_name"], r["cnt"]) for r in rows]
             return [], BrandFallback(brand=intent["brand"], clusters=clusters)
     # ... 原有逻辑
 ```
+
+设计要点：
+
+- `GROUP BY l3_category_name` 在 DB 层完成聚合，结果不受单次扫描行数影响
+- `ORDER BY cnt DESC LIMIT 10`：仅展示该品牌下 top 10 品类做 chip 选项，超过部分用"其他"chip 兜底（用户点击"其他"后 LLM 进入 free-form 追问）
+- `WHERE l3_category_name IS NOT NULL`：避免 NULL 品类污染聚类
+- 索引建议：`t_sku(brand_name, l3_category_name)` 复合索引，查询能直接走索引下推（实施阶段确认现有索引情况）
 
 返回 `BrandFallback` 对象时，agent.py 不发 `sku_results` 事件，改发 `slot_clarification`（payload 见 4.2）。
 
