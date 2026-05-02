@@ -88,6 +88,12 @@ export default function ChatWindow({ sessionId, messages, onMessagesChange, onTo
           );
           updateMessages(next);
         },
+        onSlotClarification: (slot) => {
+          const next = messagesRef.current.map((m) =>
+            m.id === assistantMsgId ? { ...m, slotClarification: slot } : m
+          );
+          updateMessages(next);
+        },
         onThinking: (status) => {
           const next = messagesRef.current.map((m) =>
             m.id === assistantMsgId && m.content === "" ? { ...m, thinkingStatus: status } : m
@@ -196,7 +202,13 @@ export default function ChatWindow({ sessionId, messages, onMessagesChange, onTo
       >
         <div style={{ maxWidth: 780, margin: "0 auto" }}>
           {displayMessages.map((msg, i) => (
-            <MessageBubble key={msg.id} message={msg} isFirst={i === 0} sessionId={sessionId} />
+            <MessageBubble
+              key={msg.id}
+              message={msg}
+              isFirst={i === 0}
+              sessionId={sessionId}
+              onChipSubmit={(text) => handleSend(text)}
+            />
           ))}
           <div ref={bottomRef} />
         </div>
