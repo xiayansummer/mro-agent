@@ -54,3 +54,17 @@ async def test_search_brand_clusters_no_results():
 
     clusters = await search_brand_clusters(mock_session, "未知品牌")
     assert clusters == []
+
+
+@pytest.mark.asyncio
+async def test_search_brand_clusters_respects_limit_param():
+    """Non-default limit must be bound through to :lim, not hardcoded."""
+    mock_session = AsyncMock()
+    mock_result = MagicMock()
+    mock_result.fetchall.return_value = []
+    mock_session.execute.return_value = mock_result
+
+    await search_brand_clusters(mock_session, "美和", limit=5)
+
+    params = mock_session.execute.call_args[0][1]
+    assert params["lim"] == 5

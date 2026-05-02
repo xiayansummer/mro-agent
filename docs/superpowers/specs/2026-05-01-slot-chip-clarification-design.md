@@ -233,7 +233,7 @@ interface ChatMessage {
 }
 ```
 
-key 是 DB 标准品牌名（与 t_sku.brand_name 一致），value 数组是别名列表。匹配时大小写不敏感。
+key 是 DB 标准品牌名（与 t_item_sample.brand_name 一致），value 数组是别名列表。匹配时大小写不敏感。
 
 ### 6.2 category_synonyms.json
 
@@ -293,7 +293,7 @@ async def search_skus(intent: dict) -> tuple[list[Sku], Optional[BrandFallback]]
         rows = await db.fetch_all(
             """
             SELECT l3_category_name, COUNT(*) as cnt
-            FROM t_sku
+            FROM t_item_sample
             WHERE brand_name = %s
               AND l3_category_name IS NOT NULL
             GROUP BY l3_category_name
@@ -313,7 +313,7 @@ async def search_skus(intent: dict) -> tuple[list[Sku], Optional[BrandFallback]]
 - `GROUP BY l3_category_name` 在 DB 层完成聚合，结果不受单次扫描行数影响
 - `ORDER BY cnt DESC LIMIT 10`：仅展示该品牌下 top 10 品类做 chip 选项，超过部分用"其他"chip 兜底（用户点击"其他"后 LLM 进入 free-form 追问）
 - `WHERE l3_category_name IS NOT NULL`：避免 NULL 品类污染聚类
-- 索引建议：`t_sku(brand_name, l3_category_name)` 复合索引，查询能直接走索引下推（实施阶段确认现有索引情况）
+- 索引建议：`t_item_sample(brand_name, l3_category_name)` 复合索引，查询能直接走索引下推（实施阶段确认现有索引情况）
 
 返回 `BrandFallback` 对象时，agent.py 不发 `sku_results` 事件，改发 `slot_clarification`（payload 见 4.2）。
 

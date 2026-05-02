@@ -268,7 +268,7 @@ async def search_brand_clusters(
         text(
             """
             SELECT l3_category_name, COUNT(*) AS cnt
-            FROM t_sku
+            FROM t_item_sample
             WHERE brand_name = :brand
               AND l3_category_name IS NOT NULL
             GROUP BY l3_category_name

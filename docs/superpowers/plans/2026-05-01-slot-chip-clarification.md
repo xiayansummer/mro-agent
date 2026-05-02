@@ -69,7 +69,7 @@
 }
 ```
 
-Note: the canonical (key) form must match how the brand is stored in `t_sku.brand_name`. Verify against DB if uncertain. The list above covers the highest-traffic 10 brands; expand based on user feedback.
+Note: the canonical (key) form must match how the brand is stored in `t_item_sample.brand_name`. Verify against DB if uncertain. The list above covers the highest-traffic 10 brands; expand based on user feedback.
 
 - [ ] **Step 2: Commit**
 
@@ -633,7 +633,7 @@ async def search_brand_clusters(
         text(
             """
             SELECT l3_category_name, COUNT(*) AS cnt
-            FROM t_sku
+            FROM t_item_sample
             WHERE brand_name = :brand
               AND l3_category_name IS NOT NULL
             GROUP BY l3_category_name
