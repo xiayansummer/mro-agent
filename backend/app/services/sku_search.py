@@ -249,3 +249,33 @@ async def find_alternatives(session: AsyncSession, parsed_intent: dict, limit: i
             return results
 
     return []
+
+
+async def search_brand_clusters(
+    session: AsyncSession,
+    brand: str,
+    limit: int = 10,
+) -> list[tuple[str, int]]:
+    """Brand-only fallback: return [(l3_category_name, sku_count), ...] for the brand.
+
+    Performs DB-side GROUP BY to avoid LIMIT-truncation skew. The first
+    sample of N rows could all belong to one L3, masking the brand's
+    other categories — that's why we aggregate in SQL, not memory.
+    """
+    if not brand:
+        return []
+    result = await session.execute(
+        text(
+            """
+            SELECT l3_category_name, COUNT(*) AS cnt
+            FROM t_sku
+            WHERE brand_name = :brand
+              AND l3_category_name IS NOT NULL
+            GROUP BY l3_category_name
+            ORDER BY cnt DESC
+            LIMIT :lim
+            """
+        ),
+        {"brand": brand, "lim": limit},
+    )
+    return [(row[0], int(row[1])) for row in result.fetchall()]
