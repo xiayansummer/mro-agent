@@ -45,6 +45,16 @@ async def _slot_round_count(session_id: str) -> int:
             return 0
 
 
+def _slot_clarification_event(parsed: dict, force_search: bool) -> str | None:
+    """Build the SSE 'slot_clarification' event payload, or None to skip emission."""
+    if force_search:
+        return None
+    payload = parsed.get("slot_clarification")
+    if not payload:
+        return None
+    return "event: slot_clarification\ndata: " + json.dumps(payload, ensure_ascii=False) + "\n\n"
+
+
 # In-memory session store for multi-turn conversations
 _sessions: dict[str, dict] = {}
 
@@ -240,6 +250,9 @@ async def handle_message(
     if is_guided or application_no_results:
         # Guided flow step 1+2: identify product type + ask structured questions
         response_mode = "guided"
+        slot_event = _slot_clarification_event(parsed, force_search)
+        if slot_event:
+            yield slot_event
         question = parsed.get("clarification_question", "能否提供更多细节？")
         async for chunk in generate_guided_selection_stream(
             user_message, inferred_need, question, conv_messages,
@@ -251,6 +264,9 @@ async def handle_message(
     elif results and need_clarification:
         # broad_spec: show products + ask for missing specs
         response_mode = "broad"
+        slot_event = _slot_clarification_event(parsed, force_search)
+        if slot_event:
+            yield slot_event
         question = parsed.get("clarification_question", "能否提供更多细节？")
         async for chunk in generate_broad_response_stream(
             user_message, results, question, conv_messages,
@@ -281,6 +297,9 @@ async def handle_message(
 
     elif need_clarification:
         response_mode = "clarification"
+        slot_event = _slot_clarification_event(parsed, force_search)
+        if slot_event:
+            yield slot_event
         question = parsed.get("clarification_question", "能否提供更多细节？")
         async for chunk in generate_clarification_stream(
             user_message, question, conv_messages
