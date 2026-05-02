@@ -580,6 +580,12 @@ async def parse_intent(
 
     parsed = json.loads(text)
 
+    # Alias-based safety net (in case LLM emits non-canonical brand/L1/L2 names).
+    # E.g. brand "TOHO" → "美和", L1 "搬运" → "物料搬运 存储包装".
+    parsed["brand"] = normalize_brand(parsed.get("brand"))
+    parsed["l1_category"] = normalize_category(parsed.get("l1_category"))
+    parsed["l2_category"] = normalize_category(parsed.get("l2_category"))
+
     # Snap LLM-generated category names to canonical DB values
     # This handles cases like "O 型圈" → "O型圈", "垫圈挡圈" → "垫圈 挡圈", etc.
     parsed["l1_category"] = _normalize_category(parsed.get("l1_category"), _KNOWN_L1)
