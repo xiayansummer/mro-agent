@@ -18,6 +18,8 @@ from app.services.standard_mapping import find_equivalents, ATTRIBUTE_KNOWLEDGE 
 from app.services.preference_ranker import rank_by_preference
 from sqlalchemy import text as _text
 
+logger = logging.getLogger(__name__)
+
 
 async def _slot_round_count(session_id: str) -> int:
     """Count prior assistant messages in this session that have a slot_clarification.
@@ -36,12 +38,12 @@ async def _slot_round_count(session_id: str) -> int:
                 {"sid": session_id},
             )
             return int(r.scalar() or 0)
-        except Exception:
-            # Column not yet migrated; treat as 0.
+        except Exception as e:
+            # Column not yet migrated, or transient DB issue. Log and treat as 0
+            # so the cap fails open (no spurious search-forcing).
+            logger.warning("slot_round_count query failed: %s", e)
             return 0
 
-
-logger = logging.getLogger(__name__)
 
 # In-memory session store for multi-turn conversations
 _sessions: dict[str, dict] = {}
