@@ -37,6 +37,26 @@ export interface ChatMessage {
   competitorResults?: CompetitorItem[];
   isStreaming?: boolean;
   thinkingStatus?: string;
+  slotClarification?: SlotClarification;
+}
+
+export interface SlotMissing {
+  key: string;
+  icon: string;
+  question: string;
+  options: string[];
+}
+
+export interface SlotKnown {
+  label: string;
+  value: string;
+}
+
+export interface SlotClarification {
+  summary: string;
+  known: SlotKnown[];
+  missing: SlotMissing[];
+  submitted?: boolean;  // server sets to true after the user has answered
 }
 
 export interface ChatSession {
