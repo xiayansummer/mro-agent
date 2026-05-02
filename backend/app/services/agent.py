@@ -226,13 +226,17 @@ async def handle_message(
     # application with no results falls back to guided knowledge response
     application_no_results = query_type == "application" and not results
 
-    # Step 3: Send SKU results (skip for guided/no-results application)
+    # When a chip card is about to render, suppress SKU + competitor for this turn.
+    # The user picks chips first; results appear on the follow-up turn.
+    suppress_results = need_clarification and not force_search
+
+    # Step 3: Send SKU results (skip for guided/no-results application/chip-card turn)
     # Skip original results if equivalent results were already sent to avoid duplicate sku_results events
-    if results and not is_guided and not equivalent_results:
+    if results and not is_guided and not equivalent_results and not suppress_results:
         sku_data = json.dumps(results, ensure_ascii=False, default=str)
         yield f"event: sku_results\ndata: {sku_data}\n\n"
 
-    if competitor_results and not is_guided:
+    if competitor_results and not is_guided and not suppress_results:
         comp_data = json.dumps(competitor_results, ensure_ascii=False, default=str)
         yield f"event: competitor_results\ndata: {comp_data}\n\n"
 

@@ -127,9 +127,17 @@ export default function App() {
 
   const handleNewChat = useCallback(() => {
     setSessions((prev) => {
-      const empty = prev.find((s) => s.messages.length === 0);
-      if (empty) {
-        setActiveId(empty.id);
+      // Only reuse a session if it's a freshly-created blank that the user never sent on.
+      // Old server-side sessions also start with messages: [] (lazy-loaded), so we must
+      // distinguish: a true blank has title === "新对话" AND was created in the last minute.
+      const fresh = prev.find(
+        (s) =>
+          s.title === "新对话" &&
+          s.messages.length === 0 &&
+          Date.now() - s.createdAt < 60_000,
+      );
+      if (fresh) {
+        setActiveId(fresh.id);
         return prev;
       }
       const newSession = createSession();
