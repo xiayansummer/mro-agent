@@ -3,14 +3,16 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ChatMessage } from "../types";
 import SkuCard from "./SkuCard";
+import SlotClarificationCard from "./SlotClarificationCard";
 
 interface Props {
   message: ChatMessage;
   isFirst?: boolean;
   sessionId?: string;
+  onChipSubmit?: (text: string) => void;
 }
 
-export default function MessageBubble({ message, isFirst, sessionId }: Props) {
+export default function MessageBubble({ message, isFirst, sessionId, onChipSubmit }: Props) {
   const isUser = message.role === "user";
   const [copied, setCopied] = useState(false);
 
@@ -92,6 +94,17 @@ export default function MessageBubble({ message, isFirst, sessionId }: Props) {
             {message.thinkingStatus && (
               <span style={{ fontSize: 12, color: "#e53e3e", fontWeight: 500 }}>{message.thinkingStatus}</span>
             )}
+          </div>
+        )}
+
+        {/* Slot clarification chip card */}
+        {message.slotClarification && (
+          <div style={{ marginBottom: 12 }}>
+            <SlotClarificationCard
+              slot={message.slotClarification}
+              disabled={!!message.slotClarification.submitted}
+              onSubmit={(text) => onChipSubmit?.(text)}
+            />
           </div>
         )}
 
