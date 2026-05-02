@@ -71,6 +71,39 @@ async def handle_message(
     query_type = parsed.get("query_type", "")
     inferred_need = parsed.get("inferred_need", "")
 
+    # ── Brand-only fallback ────────────────────────────────────────────
+    # If user gave only a brand and no category, list the brand's L3 categories
+    # via DB GROUP BY and let the user pick via chip card.
+    if (
+        parsed.get("brand")
+        and not parsed.get("l1_category")
+        and not parsed.get("l2_category")
+        and not parsed.get("l3_category")
+        and query_type in ("vague", "broad_spec")
+    ):
+        from app.services.sku_search import search_brand_clusters
+        async with AsyncSessionLocal() as db_session:
+            clusters = await search_brand_clusters(db_session, parsed["brand"])
+        if clusters:
+            slot_payload = {
+                "summary": f"{parsed['brand']}品牌下找到 {len(clusters)} 类商品",
+                "known": [{"label": "品牌", "value": parsed["brand"]}],
+                "missing": [
+                    {
+                        "key": "category",
+                        "icon": "📦",
+                        "question": "请选择具体品类",
+                        "options": [f"{name} ({cnt})" for name, cnt in clusters] + ["其他"],
+                    }
+                ],
+            }
+            yield "event: slot_clarification\ndata: " + json.dumps(slot_payload, ensure_ascii=False) + "\n\n"
+            yield "event: text\ndata: " + json.dumps(
+                f"已为您整理 {parsed['brand']} 品牌的商品分布，请选择具体品类 ↑", ensure_ascii=False
+            ) + "\n\n"
+            yield "event: done\ndata: \n\n"
+            return
+
     # Step 2: Search SKUs (manage DB session ourselves to avoid leaks in SSE)
     yield f"event: thinking\ndata: 正在搜索产品...\n\n"
 
