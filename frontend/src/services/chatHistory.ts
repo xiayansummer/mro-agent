@@ -65,6 +65,10 @@ export function detailToSession(d: SessionDetail): ChatSession {
     id: d.id,
     title: d.title,
     createdAt: d.createdAt,
-    messages: d.messages.map(m => ({ ...m, isStreaming: false })),
+    messages: d.messages.map(m => ({
+      ...m,
+      isStreaming: false,
+      slotClarification: (m as any).slotClarification,
+    })),
   };
 }
