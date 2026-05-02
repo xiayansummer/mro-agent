@@ -16,6 +16,30 @@ from app.services.response_gen import (
 from app.services.memory_service import memory_service
 from app.services.standard_mapping import find_equivalents, ATTRIBUTE_KNOWLEDGE  # noqa: F401  # find_equivalents used in Task 6
 from app.services.preference_ranker import rank_by_preference
+from sqlalchemy import text as _text
+
+
+async def _slot_round_count(session_id: str) -> int:
+    """Count prior assistant messages in this session that have a slot_clarification.
+
+    Returns 0 if the slot_clarification column doesn't exist yet (pre-migration).
+    """
+    async with AsyncSessionLocal() as s:
+        try:
+            r = await s.execute(
+                _text(
+                    "SELECT COUNT(*) FROM t_chat_message "
+                    "WHERE session_id = :sid "
+                    "AND role = 'assistant' "
+                    "AND slot_clarification IS NOT NULL"
+                ),
+                {"sid": session_id},
+            )
+            return int(r.scalar() or 0)
+        except Exception:
+            # Column not yet migrated; treat as 0.
+            return 0
+
 
 logger = logging.getLogger(__name__)
 
@@ -180,6 +204,13 @@ async def handle_message(
 
     # Guided mode: vague only — application now searches first, shows products if found
     is_guided = need_clarification and query_type == "vague"
+
+    # 3-round hard cap: stop asking, search with whatever we have
+    rounds_so_far = await _slot_round_count(session_id)
+    force_search = rounds_so_far >= 3
+    if force_search:
+        need_clarification = False
+        is_guided = False
     # application with no results falls back to guided knowledge response
     application_no_results = query_type == "application" and not results
 
