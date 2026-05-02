@@ -48,6 +48,7 @@ async def _capturing_stream(
     text_parts: list[str] = []
     sku_results: Optional[list] = None
     competitor_results: Optional[list] = None
+    slot_clarification: Optional[dict] = None
 
     pending_event: str = ""
     try:
@@ -74,6 +75,11 @@ async def _capturing_stream(
                             competitor_results = json.loads(data)
                         except Exception:
                             pass
+                    elif pending_event == "slot_clarification":
+                        try:
+                            slot_clarification = json.loads(data)
+                        except Exception:
+                            pass
                     pending_event = ""
     finally:
         # Persist after the stream ends (also runs on client disconnect)
@@ -88,6 +94,7 @@ async def _capturing_stream(
                 assistant_text=assistant_text,
                 sku_results=sku_results,
                 competitor_results=competitor_results,
+                slot_clarification=slot_clarification,
             )
         )
 
