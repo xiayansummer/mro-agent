@@ -244,19 +244,19 @@ async def handle_message(
     text_parts = []
     response_mode = "unknown"
 
-    # Prepend structured requirement summary for application queries with results
-    requirement_summary = parsed.get("requirement_summary")
-    if requirement_summary and query_type == "application" and results:
-        summary_text = f"**需求解析：** {requirement_summary}\n\n---\n\n"
-        yield f"event: text\ndata: {json.dumps(summary_text, ensure_ascii=False)}\n\n"
-        text_parts.append(summary_text)
-
-    if is_guided or application_no_results:
+    # If a chip card is being shown, emit it + a one-line intro and skip the text
+    # streamers entirely. The streamers would otherwise produce a "推荐产品" markdown
+    # table that competes with the chip card. Results appear on the follow-up turn.
+    slot_event = _slot_clarification_event(parsed, force_search)
+    if slot_event:
+        response_mode = "slot"
+        yield slot_event
+        intro = "请通过上方卡片选择需要确认的参数 ↑"
+        yield f"event: text\ndata: {json.dumps(intro, ensure_ascii=False)}\n\n"
+        text_parts.append(intro)
+    elif is_guided or application_no_results:
         # Guided flow step 1+2: identify product type + ask structured questions
         response_mode = "guided"
-        slot_event = _slot_clarification_event(parsed, force_search)
-        if slot_event:
-            yield slot_event
         question = parsed.get("clarification_question", "能否提供更多细节？")
         async for chunk in generate_guided_selection_stream(
             user_message, inferred_need, question, conv_messages,
@@ -268,9 +268,6 @@ async def handle_message(
     elif results and need_clarification:
         # broad_spec: show products + ask for missing specs
         response_mode = "broad"
-        slot_event = _slot_clarification_event(parsed, force_search)
-        if slot_event:
-            yield slot_event
         question = parsed.get("clarification_question", "能否提供更多细节？")
         async for chunk in generate_broad_response_stream(
             user_message, results, question, conv_messages,
@@ -301,9 +298,6 @@ async def handle_message(
 
     elif need_clarification:
         response_mode = "clarification"
-        slot_event = _slot_clarification_event(parsed, force_search)
-        if slot_event:
-            yield slot_event
         question = parsed.get("clarification_question", "能否提供更多细节？")
         async for chunk in generate_clarification_stream(
             user_message, question, conv_messages
