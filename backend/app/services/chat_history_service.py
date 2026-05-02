@@ -67,7 +67,7 @@ async def get_session(session_id: str, user_id: str) -> Optional[dict]:
 
         msgs_r = await s.execute(
             text(
-                "SELECT id, role, content, image_data, sku_results, competitor_results "
+                "SELECT id, role, content, image_data, sku_results, competitor_results, slot_clarification "
                 "FROM t_chat_message WHERE session_id = :sid ORDER BY id"
             ),
             {"sid": session_id},
@@ -76,6 +76,7 @@ async def get_session(session_id: str, user_id: str) -> Optional[dict]:
         for m in msgs_r.fetchall():
             sku_results = json.loads(m[4]) if m[4] else None
             comp_results = json.loads(m[5]) if m[5] else None
+            slot_clar = json.loads(m[6]) if m[6] else None
             messages.append({
                 "id": str(m[0]),
                 "role": m[1],
@@ -83,6 +84,7 @@ async def get_session(session_id: str, user_id: str) -> Optional[dict]:
                 "imageUrl": m[3] or None,
                 "skuResults": sku_results,
                 "competitorResults": comp_results,
+                "slotClarification": slot_clar,
             })
 
         return {
@@ -134,6 +136,7 @@ async def save_turn(
     assistant_text: str,
     sku_results: Optional[list],
     competitor_results: Optional[list],
+    slot_clarification: Optional[dict] = None,
 ) -> None:
     """
     Save one user/assistant turn. Creates the session row if needed; updates title from
@@ -182,17 +185,33 @@ async def save_turn(
                 {"sid": session_id, "content": user_message, "img": image_b64 or None},
             )
 
+            # Auto-mark the prior slot_clarification (if any) as submitted —
+            # the user has effectively answered by sending this new message.
+            await s.execute(
+                text(
+                    "UPDATE t_chat_message "
+                    "SET slot_clarification = JSON_SET(slot_clarification, '$.submitted', CAST('true' AS JSON)) "
+                    "WHERE session_id = :sid "
+                    "AND role = 'assistant' "
+                    "AND slot_clarification IS NOT NULL "
+                    "AND JSON_EXTRACT(slot_clarification, '$.submitted') IS NULL "
+                    "ORDER BY id DESC LIMIT 1"
+                ),
+                {"sid": session_id},
+            )
+
             # Insert assistant message
             await s.execute(
                 text(
-                    "INSERT INTO t_chat_message (session_id, role, content, sku_results, competitor_results) "
-                    "VALUES (:sid, 'assistant', :content, :sku, :comp)"
+                    "INSERT INTO t_chat_message (session_id, role, content, sku_results, competitor_results, slot_clarification) "
+                    "VALUES (:sid, 'assistant', :content, :sku, :comp, :slot)"
                 ),
                 {
                     "sid": session_id,
                     "content": assistant_text,
                     "sku": json.dumps(sku_results, ensure_ascii=False) if sku_results else None,
                     "comp": json.dumps(competitor_results, ensure_ascii=False) if competitor_results else None,
+                    "slot": json.dumps(slot_clarification, ensure_ascii=False) if slot_clarification else None,
                 },
             )
 
