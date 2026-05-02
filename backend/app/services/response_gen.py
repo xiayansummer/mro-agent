@@ -165,9 +165,6 @@ async def generate_broad_response_stream(
         if delta and delta.content:
             yield delta.content
 
-    # Inject the 5-field clarification table directly (more reliable than LLM-generated)
-    yield f"\n\n---\n\n**请确认以下参数，以便精准匹配：**\n\n{clarification_question}"
-
 
 async def generate_guided_selection_stream(
     user_message: str,
@@ -184,10 +181,11 @@ async def generate_guided_selection_stream(
     is_novice = "级别：新手" in memory_context or "novice" in memory_context
 
     if query_type == "vague":
-        # Directly stream the 5-field clarification table — no AI regeneration needed
-        inferred_line = f"**初步判断**：{inferred_need}\n\n" if inferred_need else ""
-        content = f"{inferred_line}请告诉我您的具体需求，以便精准推荐：\n\n{clarification_question}"
-        yield content
+        # Chip card (slot_clarification SSE event) carries the structured questions.
+        # Just emit a short intro line; the markdown table injection is no longer needed.
+        if inferred_need:
+            yield f"**初步判断**：{inferred_need}\n\n"
+        yield "请通过上方卡片选择需要确认的参数 ↑"
         return
 
     elif is_novice:
