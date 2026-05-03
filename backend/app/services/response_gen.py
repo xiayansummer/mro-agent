@@ -5,11 +5,13 @@ from app.config import settings
 
 
 def _enable_thinking(query_type: str) -> bool:
-    """Turn on Qwen thinking mode only for application queries (use case → category → spec inference).
+    """Turn on Qwen thinking mode for application queries.
 
-    Toggle off globally with THINKING_ON_APPLICATION=false in .env.
+    Default OFF — qwen3.6-plus produces ~25s of reasoning chunks (delta.reasoning_content)
+    before any delta.content arrives, which kills streaming UX. Opt in by setting
+    THINKING_ON_APPLICATION=true in .env if you want to A/B test.
     """
-    if os.getenv("THINKING_ON_APPLICATION", "true").lower() != "true":
+    if os.getenv("THINKING_ON_APPLICATION", "false").lower() != "true":
         return False
     return query_type == "application"
 
