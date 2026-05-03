@@ -154,8 +154,19 @@ async def handle_message(
     kw_list = parsed.get("keywords") or []
     spec_kw = parsed.get("spec_keywords") or []
     brand_kw = parsed.get("brand") or ""
+    # Fallback noun: after a few chip rounds the user message becomes spec-only
+    # (e.g. "2吨 6米 HSH"), so keywords is empty but we still know the L3 from
+    # conversation history. Without a noun the competitor search returns nothing.
+    noun_fallback: list[str] = []
+    if not kw_list:
+        l3 = parsed.get("l3_category") or ""
+        l2 = parsed.get("l2_category") or ""
+        if l3:
+            noun_fallback = [l3]
+        elif l2:
+            noun_fallback = [l2]
     competitor_spec = [s for s in spec_kw if not _looks_like_model_number(s)]
-    competitor_query = " ".join(kw_list + competitor_spec + ([brand_kw] if brand_kw else []))
+    competitor_query = " ".join(kw_list + noun_fallback + competitor_spec + ([brand_kw] if brand_kw else []))
 
     async with AsyncSessionLocal() as db_session:
         if competitor_query:
