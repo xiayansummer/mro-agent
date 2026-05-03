@@ -1,6 +1,17 @@
+import os
 from collections.abc import AsyncGenerator
 from openai import OpenAI
 from app.config import settings
+
+
+def _enable_thinking(query_type: str) -> bool:
+    """Turn on Qwen thinking mode only for application queries (use case → category → spec inference).
+
+    Toggle off globally with THINKING_ON_APPLICATION=false in .env.
+    """
+    if os.getenv("THINKING_ON_APPLICATION", "true").lower() != "true":
+        return False
+    return query_type == "application"
 
 client = OpenAI(api_key=settings.AI_API_KEY, base_url=settings.AI_BASE_URL)
 
@@ -107,7 +118,7 @@ async def generate_response_stream(
         max_tokens=1024,
         messages=messages,
         stream=True,
-        extra_body={"enable_thinking": False},
+        extra_body={"enable_thinking": _enable_thinking(query_type)},
     )
 
     for chunk in stream:
@@ -221,7 +232,7 @@ async def generate_guided_selection_stream(
         max_tokens=600,
         messages=messages,
         stream=True,
-        extra_body={"enable_thinking": False},
+        extra_body={"enable_thinking": _enable_thinking(query_type)},
     )
 
     for chunk in stream:
@@ -320,7 +331,7 @@ async def generate_no_results_stream(
         max_tokens=600,
         messages=messages,
         stream=True,
-        extra_body={"enable_thinking": False},
+        extra_body={"enable_thinking": _enable_thinking(parsed_intent.get("query_type", ""))},
     )
 
     for chunk in stream:
