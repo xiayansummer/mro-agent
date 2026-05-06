@@ -8,5 +8,11 @@
   "科德宝": ["Freudenberg", "freudenberg", "科德宝"],
   "博世": ["BOSCH", "bosch", "Bosch"],
   "施耐德": ["Schneider", "schneider"],
-  "西门子": ["Siemens", "siemens", "SIEMENS"]
+  "西门子": ["Siemens", "siemens", "SIEMENS"],
+  "诺霸": ["Norbar", "NORBAR", "norbar", "诺霸Norbar", "诺霸/Norbar", "Norbar(诺霸)", "Norbar (诺霸)"],
+  "亚德客": ["AirTAC", "AIRTAC", "airtac", "亚德客AirTAC", "亚德客（AIRTAC）"],
+  "阿姆斯壮": ["Armstrong", "ARMSTRONG", "armstrong", "ARMSTRONG/阿姆斯壮", "阿姆斯壮Armstrong"],
+  "3M": ["3M思高", "3M.", "3m"],
+  "实耐宝": ["SNAP-ON", "SNAP_ON", "snap-on", "Snap-on", "SnapOn"],
+  "吉多瑞": ["GEDORE", "Gedore", "gedore"]
 }
