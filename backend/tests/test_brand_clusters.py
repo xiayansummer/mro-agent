@@ -23,15 +23,20 @@ async def test_search_brand_clusters_groups_by_l3():
 
     clusters = await search_brand_clusters(mock_session, "美和")
 
-    # SQL must use GROUP BY (verified by inspecting the call)
+    # SQL must use GROUP BY + IN expansion across brand variants
     sql_text = str(mock_session.execute.call_args[0][0])
     assert "GROUP BY" in sql_text.upper()
     assert "ORDER BY" in sql_text.upper()
     assert "l3_category_name" in sql_text
+    assert "IN (" in sql_text
 
-    # Brand parameter should be passed
+    # Brand variants should be bound as :b0, :b1, ... and the canonical "美和"
+    # plus its aliases (TOHO/美和TOHO/...) all appear in params.
     params = mock_session.execute.call_args[0][1]
-    assert params == {"brand": "美和", "lim": 10}
+    assert params["lim"] == 10
+    variant_values = {v for k, v in params.items() if k.startswith("b")}
+    assert "美和" in variant_values
+    assert "TOHO" in variant_values
 
     # Returns list of (l3_name, count) tuples in order from DB
     assert clusters == [("手拉葫芦", 8), ("电动葫芦", 3), ("钢丝绳", 12)]

@@ -45,6 +45,26 @@ def normalize_brand(brand: Optional[str]) -> Optional[str]:
     return _build_alias_to_canonical().get(brand.lower(), brand)
 
 
+def get_brand_variants(brand: Optional[str]) -> list[str]:
+    """Return all DB-side string variants of a brand: canonical + every known alias.
+
+    Used by sku_search to expand a brand filter into OR-LIKE across all variants,
+    catching DB rows that use non-canonical spellings (e.g. NORBAR, 诺霸Norbar)
+    when the user/LLM submits the canonical form ("诺霸").
+
+    Accepts canonical OR alias input. Unknown brands echo back as a single-item list.
+    """
+    if not brand:
+        return []
+    aliases_map = load_brand_aliases()
+    if brand in aliases_map:
+        return [brand] + aliases_map[brand]
+    canonical = _build_alias_to_canonical().get(brand.lower())
+    if canonical:
+        return [canonical] + aliases_map.get(canonical, [])
+    return [brand]
+
+
 def normalize_category(category: Optional[str]) -> Optional[str]:
     """Map a synonym (exact whole-string match) to standard L1/L2 name."""
     if not category:

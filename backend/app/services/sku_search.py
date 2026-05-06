@@ -109,12 +109,19 @@ async def search_skus(session: AsyncSession, parsed_intent: dict, limit: int = 2
         model_clauses.append(f"mfg_sku LIKE :mn_{i}")
         params[f"mn_{i}"] = f"%{mn}%"
 
-    # Brand filter
+    # Brand filter — expand canonical brand to all known variants so DB rows with
+    # non-canonical spellings (NORBAR, 诺霸Norbar, etc.) still match.
     brand = parsed_intent.get("brand")
     brand_clause = ""
     if brand:
-        brand_clause = "brand_name LIKE :brand"
-        params["brand"] = f"%{brand}%"
+        from app.services.normalization import get_brand_variants
+        variants = get_brand_variants(brand)
+        likes = []
+        for i, v in enumerate(variants):
+            key = f"brand_v{i}"
+            likes.append(f"brand_name LIKE :{key}")
+            params[key] = f"%{v}%"
+        brand_clause = "(" + " OR ".join(likes) + ")"
 
     # When model numbers are present, run a dedicated compatibility search first.
     # This guarantees model-matched products appear at the top of results,
@@ -264,18 +271,23 @@ async def search_brand_clusters(
     """
     if not brand:
         return []
+    from app.services.normalization import get_brand_variants
+    variants = get_brand_variants(brand)
+    placeholders = ",".join(f":b{i}" for i in range(len(variants)))
+    params: dict = {f"b{i}": v for i, v in enumerate(variants)}
+    params["lim"] = limit
     result = await session.execute(
         text(
-            """
+            f"""
             SELECT l3_category_name, COUNT(*) AS cnt
             FROM t_item_sample
-            WHERE brand_name = :brand
+            WHERE brand_name IN ({placeholders})
               AND l3_category_name IS NOT NULL
             GROUP BY l3_category_name
             ORDER BY cnt DESC
             LIMIT :lim
             """
         ),
-        {"brand": brand, "lim": limit},
+        params,
     )
     return [(row[0], int(row[1])) for row in result.fetchall()]
