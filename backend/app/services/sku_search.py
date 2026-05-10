@@ -71,14 +71,18 @@ def _looks_like_model_number(s: str) -> bool:
 async def search_skus(session: AsyncSession, parsed_intent: dict, limit: int = 20) -> list[dict]:
     params = {}
 
-    # Category filters (always AND-ed)
+    # Category filters (always AND-ed). Use exact equality, NOT LIKE: LIKE %x%
+    # caused substring pollution — e.g. l3_category="电动工具" matched
+    # "电动工具配套电池 充电器" while excluding the actual L3 "电动螺丝刀".
+    # If the LLM outputs a wrong category, exact match returns 0 and lets
+    # relaxed_search drop levels rather than silently returning the wrong cluster.
     cat_conditions = []
     for i, key in enumerate(["l1_category", "l2_category", "l3_category", "l4_category"]):
         col = f"{key}_name"
         value = parsed_intent.get(key)
         if value:
-            cat_conditions.append(f"{col} LIKE :cat_{i}")
-            params[f"cat_{i}"] = f"%{value}%"
+            cat_conditions.append(f"{col} = :cat_{i}")
+            params[f"cat_{i}"] = value
 
     # Keyword matching on item_name — ANY keyword must match (OR), not all (AND).
     keywords = parsed_intent.get("keywords", [])
@@ -131,7 +135,14 @@ async def search_skus(session: AsyncSession, parsed_intent: dict, limit: int = 2
     seen_codes: set[str] = set()
 
     if model_clauses:
-        compat_parts = list(cat_conditions)  # respect category filters
+        # Model-number search short-circuits category filters: when the user
+        # provides an exact mfg_sku, intent_parser's category guess is often
+        # wrong (L2 mistaken for L3, etc.), and dropping the model match for
+        # category disagreement masks the right product. Brand still filters
+        # to avoid cross-brand collisions on shared model patterns.
+        compat_parts = []
+        if brand_clause:
+            compat_parts.append(brand_clause)
         compat_parts.append(f"({' OR '.join(model_clauses)})")
         compat_query = f"""
             SELECT item_code, item_name, brand_name, specification, mfg_sku,
