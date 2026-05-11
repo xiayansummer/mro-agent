@@ -71,11 +71,9 @@ def _looks_like_model_number(s: str) -> bool:
 async def search_skus(session: AsyncSession, parsed_intent: dict, limit: int = 20) -> list[dict]:
     params = {}
 
-    # Category filters (always AND-ed). Use exact equality, NOT LIKE: LIKE %x%
-    # caused substring pollution — e.g. l3_category="电动工具" matched
-    # "电动工具配套电池 充电器" while excluding the actual L3 "电动螺丝刀".
-    # If the LLM outputs a wrong category, exact match returns 0 and lets
-    # relaxed_search drop levels rather than silently returning the wrong cluster.
+    # Category filters: exact equality so wrong-category fails fast into
+    # relaxed_search instead of substring-polluting into a sibling cluster.
+    # Safe because intent_parser snaps categories to _KNOWN_L{1,2,3} upstream.
     cat_conditions = []
     for i, key in enumerate(["l1_category", "l2_category", "l3_category", "l4_category"]):
         col = f"{key}_name"
@@ -121,12 +119,12 @@ async def search_skus(session: AsyncSession, parsed_intent: dict, limit: int = 2
         from app.services.normalization import discover_brand_variants
         variants = await discover_brand_variants(session, brand)
         if variants:
-            likes = []
+            placeholders = []
             for i, v in enumerate(variants):
                 key = f"brand_v{i}"
-                likes.append(f"brand_name LIKE :{key}")
-                params[key] = f"%{v}%"
-            brand_clause = "(" + " OR ".join(likes) + ")"
+                placeholders.append(f":{key}")
+                params[key] = v
+            brand_clause = f"brand_name IN ({', '.join(placeholders)})"
 
     # When model numbers are present, run a dedicated compatibility search first.
     # This guarantees model-matched products appear at the top of results,
@@ -135,11 +133,9 @@ async def search_skus(session: AsyncSession, parsed_intent: dict, limit: int = 2
     seen_codes: set[str] = set()
 
     if model_clauses:
-        # Model-number search short-circuits category filters: when the user
-        # provides an exact mfg_sku, intent_parser's category guess is often
-        # wrong (L2 mistaken for L3, etc.), and dropping the model match for
-        # category disagreement masks the right product. Brand still filters
-        # to avoid cross-brand collisions on shared model patterns.
+        # Exact mfg_sku is the strongest signal — bypass category (intent_parser
+        # often mis-classifies L2 as L3). Brand still filters to avoid cross-brand
+        # collisions on shared model patterns.
         compat_parts = []
         if brand_clause:
             compat_parts.append(brand_clause)
