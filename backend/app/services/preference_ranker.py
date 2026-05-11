@@ -20,8 +20,11 @@ def rank_by_preference(results: list[dict], memory_context: str) -> list[dict]:
             score += prefs["liked_categories"][l2]
         return score
 
+    # Exact mfg_sku matches (flagged by sku_search compat fast-path) pin to the
+    # top regardless of brand preference — a precise model number is a stronger
+    # intent signal than "user usually prefers brand X".
     indexed = list(enumerate(results))
-    indexed.sort(key=lambda x: (-preference_score(x[1]), x[0]))
+    indexed.sort(key=lambda x: (not x[1].get("_exact_match"), -preference_score(x[1]), x[0]))
     return [item for _, item in indexed]
 
 

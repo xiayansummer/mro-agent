@@ -155,6 +155,7 @@ async def search_skus(session: AsyncSession, parsed_intent: dict, limit: int = 2
         rows = (await session.execute(
             text(f"{select_cols} WHERE {eq_where} LIMIT :limit"), compat_params
         )).fetchall()
+        is_exact = bool(rows)
 
         # Fallback: substring LIKE (no index but tolerates partial / dirty input).
         if not rows:
@@ -164,13 +165,19 @@ async def search_skus(session: AsyncSession, parsed_intent: dict, limit: int = 2
             )).fetchall()
 
         for row in rows:
-            compat_results.append({
+            item = {
                 "item_code": row[0], "item_name": row[1], "brand_name": row[2],
                 "specification": row[3], "mfg_sku": row[4],
                 "l1_category_name": row[5], "l2_category_name": row[6],
                 "l3_category_name": row[7], "l4_category_name": row[8],
                 "attribute_details": row[9],
-            })
+            }
+            if is_exact:
+                # Pin exact mfg_sku matches above preference ranking — when the
+                # user pastes a specific model, that IS the answer regardless
+                # of which brand they normally prefer.
+                item["_exact_match"] = True
+            compat_results.append(item)
             seen_codes.add(row[0])
 
     # Standard search (keyword + regular specs + categories)
