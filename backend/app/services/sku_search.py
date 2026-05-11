@@ -110,6 +110,7 @@ async def search_skus(session: AsyncSession, parsed_intent: dict, limit: int = 2
     for i, mn in enumerate(model_numbers):
         model_clauses.append(f"mfg_sku LIKE :mn_{i}")
         params[f"mn_{i}"] = f"%{mn}%"
+        params[f"mn_eq_{i}"] = mn  # for fast-path exact match below
 
     # Brand filter — expand to all DB-side spellings clustered with this brand.
     # Discovery is cached per canonical (TTL ~1h) so subsequent searches don't re-scan.
@@ -139,19 +140,30 @@ async def search_skus(session: AsyncSession, parsed_intent: dict, limit: int = 2
         compat_parts = []
         if brand_clause:
             compat_parts.append(brand_clause)
-        compat_parts.append(f"({' OR '.join(model_clauses)})")
-        compat_query = f"""
-            SELECT item_code, item_name, brand_name, specification, mfg_sku,
-                   l1_category_name, l2_category_name, l3_category_name, l4_category_name,
-                   attribute_details
-            FROM t_item_sample
-            WHERE {' AND '.join(compat_parts)}
-            LIMIT :limit
-        """
-        compat_params = {k: v for k, v in params.items()}
-        compat_params["limit"] = limit
-        compat_result = await session.execute(text(compat_query), compat_params)
-        for row in compat_result.fetchall():
+
+        select_cols = (
+            "SELECT item_code, item_name, brand_name, specification, mfg_sku, "
+            "l1_category_name, l2_category_name, l3_category_name, l4_category_name, "
+            "attribute_details FROM t_item_sample"
+        )
+        compat_params = {**params, "limit": limit}
+
+        # Fast path: exact mfg_sku match (uses idx_mfg_sku, sub-ms). Common case:
+        # users paste a full model number from a quote / BOM / spec sheet.
+        eq_in = ", ".join(f":mn_eq_{i}" for i in range(len(model_numbers)))
+        eq_where = " AND ".join(compat_parts + [f"mfg_sku IN ({eq_in})"])
+        rows = (await session.execute(
+            text(f"{select_cols} WHERE {eq_where} LIMIT :limit"), compat_params
+        )).fetchall()
+
+        # Fallback: substring LIKE (no index but tolerates partial / dirty input).
+        if not rows:
+            like_where = " AND ".join(compat_parts + [f"({' OR '.join(model_clauses)})"])
+            rows = (await session.execute(
+                text(f"{select_cols} WHERE {like_where} LIMIT :limit"), compat_params
+            )).fetchall()
+
+        for row in rows:
             compat_results.append({
                 "item_code": row[0], "item_name": row[1], "brand_name": row[2],
                 "specification": row[3], "mfg_sku": row[4],
