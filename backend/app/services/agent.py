@@ -3,7 +3,7 @@ import json
 import logging
 from collections.abc import AsyncGenerator
 from app.db.mysql import AsyncSessionLocal
-from app.services import chat_history_service
+from app.services import chat_history_service, comparison_draft_service
 from app.services.intent_parser import parse_intent
 from app.services.sku_search import search_skus, relaxed_search, attach_files, find_alternatives
 from app.services.competitor_search import search_ehsy
@@ -91,7 +91,7 @@ async def handle_message(
     user_id: str = "",
     image_base64: str = "",
 ) -> AsyncGenerator[str, None]:
-    """Main agent orchestration: parse intent → search → generate response via SSE."""
+    """Main agent orchestration: create external comparison draft via SSE."""
     # Immediately acknowledge receipt so the UI shows activity
     yield "event: thinking\ndata: 正在理解需求...\n\n"
 
@@ -100,7 +100,6 @@ async def handle_message(
     # Build conversation context for Claude (keep last 6 turns)
     conv_messages = ctx["conversation"][-6:]
 
-    # Step 1: Parse intent (with memory context if available)
     effective_user_id = user_id or session_id
     memory_context = ""
     try:
@@ -111,269 +110,50 @@ async def handle_message(
         logger.warning(f"Memory retrieval failed (non-fatal): {e}")
 
     try:
-        parsed = await parse_intent(user_message, conv_messages, memory_context, image_base64)
-        logger.info(f"Parsed intent: {json.dumps(parsed, ensure_ascii=False)}")
+        result = await comparison_draft_service.create_draft_from_message(
+            user_id=user_id,
+            session_id=session_id,
+            message=user_message,
+            conversation_context=conv_messages,
+            memory_context=memory_context,
+        )
     except Exception as e:
-        logger.error(f"Intent parsing failed: {e}")
-        yield f"event: error\ndata: 抱歉，我暂时无法理解您的需求，请换个方式描述。\n\n"
+        logger.error(f"Comparison draft creation failed: {e}", exc_info=True)
+        yield "event: error\ndata: 抱歉，我暂时无法处理该比价需求，请换个方式描述。\n\n"
         return
 
+    parsed = result.get("parsedIntent") or {}
     ctx["last_intent"] = parsed
-    need_clarification = parsed.get("need_clarification", False)
-    query_type = parsed.get("query_type", "")
-    inferred_need = parsed.get("inferred_need", "")
 
-    # ── Brand-only fallback ────────────────────────────────────────────
-    # If user gave only a brand and no category, list the brand's L3 categories
-    # via DB GROUP BY and let the user pick via chip card.
-    if (
-        parsed.get("brand")
-        and not parsed.get("l1_category")
-        and not parsed.get("l2_category")
-        and not parsed.get("l3_category")
-        and query_type in ("vague", "broad_spec")
-    ):
-        from app.services.sku_search import search_brand_clusters
-        async with AsyncSessionLocal() as db_session:
-            clusters = await search_brand_clusters(db_session, parsed["brand"])
-        if clusters:
-            slot_payload = {
-                "summary": f"{parsed['brand']}品牌下找到 {len(clusters)} 类商品",
-                "known": [{"label": "品牌", "value": parsed["brand"]}],
-                "missing": [
-                    {
-                        "key": "category",
-                        "icon": "📦",
-                        "question": "请选择具体品类",
-                        "options": [f"{name} ({cnt})" for name, cnt in clusters] + ["其他"],
-                    }
-                ],
-            }
-            yield "event: slot_clarification\ndata: " + json.dumps(slot_payload, ensure_ascii=False) + "\n\n"
-            yield "event: text\ndata: " + json.dumps(
-                f"已为您整理 {parsed['brand']} 品牌的商品分布，请选择具体品类 ↑", ensure_ascii=False
-            ) + "\n\n"
-            yield "event: done\ndata: \n\n"
-            return
+    if not result.get("shouldCreateDraft"):
+        guidance = result.get("guidance") or "请补充产品名称、规格或采购约束。"
+        yield f"event: text\ndata: {json.dumps(guidance, ensure_ascii=False)}\n\n"
+        ctx["conversation"].append({"role": "user", "content": user_message})
+        ctx["conversation"].append({"role": "assistant", "content": guidance})
+        yield "event: done\ndata: \n\n"
+        return
 
-    # Step 2: Search SKUs (manage DB session ourselves to avoid leaks in SSE)
-    yield f"event: thinking\ndata: 正在搜索产品...\n\n"
-
-    # Limit results by query precision to avoid overwhelming users
-    # precise → 20 results; broad_spec → 8; application → 5; vague → 3
-    _limit_map = {"precise": 20, "broad_spec": 8, "application": 5, "vague": 3}
-    search_limit = _limit_map.get(query_type, 10)
-
-    # Build competitor query from keywords
-    # Exclude machine/equipment model numbers — they cause 西域 to return the machine itself
-    from app.services.sku_search import _looks_like_model_number
-    kw_list = parsed.get("keywords") or []
-    spec_kw = parsed.get("spec_keywords") or []
-    brand_kw = parsed.get("brand") or ""
-    # Fallback noun: after a few chip rounds the user message becomes spec-only
-    # (e.g. "2吨 6米 HSH"), so keywords is empty but we still know the L3 from
-    # conversation history. Without a noun the competitor search returns nothing.
-    noun_fallback: list[str] = []
-    if not kw_list:
-        l3 = parsed.get("l3_category") or ""
-        l2 = parsed.get("l2_category") or ""
-        if l3:
-            noun_fallback = [l3]
-        elif l2:
-            noun_fallback = [l2]
-    competitor_spec = [s for s in spec_kw if not _looks_like_model_number(s)]
-    competitor_query = " ".join(kw_list + noun_fallback + competitor_spec + ([brand_kw] if brand_kw else []))
-
-    async with AsyncSessionLocal() as db_session:
-        if competitor_query:
-            db_task = search_skus(db_session, parsed, limit=search_limit)
-            competitor_task = search_ehsy(competitor_query, limit=5)
-            (results, competitor_results) = await asyncio.gather(db_task, competitor_task)
-        else:
-            results = await search_skus(db_session, parsed, limit=search_limit)
-            competitor_results = []
-
-        if not results:
-            results = await relaxed_search(db_session, parsed, limit=search_limit)
-
-        results = await attach_files(db_session, results)
-
-    ctx["last_results"] = results
-
-    # ── 属性建议富化（broad_spec + attribute_gaps 时）──────────────────
-    attribute_gaps = parsed.get("attribute_gaps") or []
-    if attribute_gaps and query_type == "broad_spec" and results:
-        parsed["attribute_suggestions"] = _build_attribute_suggestions(
-            attribute_gaps, results, memory_context
-        )
-
-    # ── 偏好排序（所有有结果的查询）──────────────────────────────────────
-    if results and memory_context:
-        results = rank_by_preference(results, memory_context)
-        ctx["last_results"] = results
-
-    # ── 等效标准替代（结果 < 3 且含已知标准号）──────────────────────────
-    equivalent_results: list[dict] = []
-    original_standard: str = ""
-    if len(results) < 3 and not need_clarification:
-        all_kws = (parsed.get("keywords") or []) + (parsed.get("spec_keywords") or [])
-        equivalents = find_equivalents(all_kws)
-        if equivalents:
-            # 找出触发等效替代的原始标准号（从 all_kws 中找第一个匹配已知标准的关键词）
-            from app.services.standard_mapping import STANDARD_EQUIVALENTS
-            for kw in all_kws:
-                normalized = kw.upper().replace(" ", "").replace("/", "").replace("-", "").replace(".", "")
-                if normalized in {k.upper().replace(" ", "").replace("/", "").replace("-", "").replace(".", "") for k in STANDARD_EQUIVALENTS}:
-                    original_standard = kw
-                    break
-
-            yield f"event: thinking\ndata: 正在搜索等效替代产品...\n\n"
-            equiv_parsed = {
-                **parsed,
-                "spec_keywords": (parsed.get("spec_keywords") or []) + equivalents,
-            }
-            async with AsyncSessionLocal() as db_session:
-                equivalent_results = await search_skus(db_session, equiv_parsed, limit=search_limit)
-                equivalent_results = await attach_files(db_session, equivalent_results)
-
-            if equivalent_results:
-                ctx["last_results"] = equivalent_results
-                equiv_data = json.dumps(equivalent_results, ensure_ascii=False, default=str)
-                yield f"event: sku_results\ndata: {equiv_data}\n\n"
-
-    # Guided mode: vague only — application now searches first, shows products if found
-    is_guided = need_clarification and query_type == "vague"
-
-    # 3-round hard cap: stop asking, search with whatever we have
-    rounds_so_far = await _slot_round_count(session_id)
-    force_search = rounds_so_far >= 3
-    if force_search:
-        need_clarification = False
-        is_guided = False
-    # application with no results falls back to guided knowledge response
-    application_no_results = query_type == "application" and not results
-
-    # When a chip card is about to render, suppress SKU + competitor for this turn.
-    # The user picks chips first; results appear on the follow-up turn.
-    suppress_results = need_clarification and not force_search
-
-    # Step 3: Send SKU results (skip for guided/no-results application/chip-card turn)
-    # Skip original results if equivalent results were already sent to avoid duplicate sku_results events
-    if results and not is_guided and not equivalent_results and not suppress_results:
-        sku_data = json.dumps(results, ensure_ascii=False, default=str)
-        yield f"event: sku_results\ndata: {sku_data}\n\n"
-
-    if competitor_results and not is_guided and not suppress_results:
-        comp_data = json.dumps(competitor_results, ensure_ascii=False, default=str)
-        yield f"event: competitor_results\ndata: {comp_data}\n\n"
-
-    # Step 4: Generate response
-    text_parts = []
-    response_mode = "unknown"
-
-    # If a chip card is being shown, emit it + a one-line intro and skip the text
-    # streamers entirely. The streamers would otherwise produce a "推荐产品" markdown
-    # table that competes with the chip card. Results appear on the follow-up turn.
-    slot_event = _slot_clarification_event(parsed, force_search)
-    if slot_event:
-        response_mode = "slot"
-        yield slot_event
-        intro = "请通过上方卡片选择需要确认的参数 ↑"
-        yield f"event: text\ndata: {json.dumps(intro, ensure_ascii=False)}\n\n"
-        text_parts.append(intro)
-    elif is_guided or application_no_results:
-        # Guided flow step 1+2: identify product type + ask structured questions
-        response_mode = "guided"
-        question = parsed.get("clarification_question", "能否提供更多细节？")
-        async for chunk in generate_guided_selection_stream(
-            user_message, inferred_need, question, conv_messages,
-            query_type=query_type, memory_context=memory_context,
-        ):
-            yield f"event: text\ndata: {json.dumps(chunk, ensure_ascii=False)}\n\n"
-            text_parts.append(chunk)
-
-    elif results and need_clarification:
-        # broad_spec: show products + ask for missing specs
-        response_mode = "broad"
-        question = parsed.get("clarification_question", "能否提供更多细节？")
-        async for chunk in generate_broad_response_stream(
-            user_message, results, question, conv_messages,
-            query_type=query_type, inferred_need=inferred_need, memory_context=memory_context,
-            attribute_suggestions=parsed.get("attribute_suggestions"),
-        ):
-            yield f"event: text\ndata: {json.dumps(chunk, ensure_ascii=False)}\n\n"
-            text_parts.append(chunk)
-
-    elif equivalent_results and original_standard:
-        response_mode = "equivalent"
-        from app.services.response_gen import generate_equivalent_stream
-        async for chunk in generate_equivalent_stream(
-            user_message, equivalent_results, original_standard,
-            memory_context=memory_context,
-        ):
-            yield f"event: text\ndata: {json.dumps(chunk, ensure_ascii=False)}\n\n"
-            text_parts.append(chunk)
-
-    elif results and not equivalent_results:
-        response_mode = "precise"
-        async for chunk in generate_response_stream(
-            user_message, results, conv_messages,
-            query_type=query_type, inferred_need=inferred_need, memory_context=memory_context,
-        ):
-            yield f"event: text\ndata: {json.dumps(chunk, ensure_ascii=False)}\n\n"
-            text_parts.append(chunk)
-
-    elif need_clarification:
-        response_mode = "clarification"
-        question = parsed.get("clarification_question", "能否提供更多细节？")
-        async for chunk in generate_clarification_stream(
-            user_message, question, conv_messages
-        ):
-            yield f"event: text\ndata: {json.dumps(chunk, ensure_ascii=False)}\n\n"
-            text_parts.append(chunk)
-
-    else:
-        response_mode = "no_results"
-        # Find similar products to show as alternatives
-        async with AsyncSessionLocal() as db_session:
-            alternatives = await find_alternatives(db_session, parsed, limit=10)
-            alternatives = await attach_files(db_session, alternatives)
-
-        if alternatives:
-            alt_data = json.dumps(alternatives, ensure_ascii=False, default=str)
-            yield f"event: sku_results\ndata: {alt_data}\n\n"
-
-        async for chunk in generate_no_results_stream(user_message, parsed, alternatives):
-            yield f"event: text\ndata: {json.dumps(chunk, ensure_ascii=False)}\n\n"
-            text_parts.append(chunk)
-
-    # Store compact search summary for continuity (cleaner than full prose for intent parsing)
-    kws = parsed.get("keywords") or []
-    specs = parsed.get("spec_keywords") or []
-    brand = parsed.get("brand") or ""
-    search_summary = f"[已搜索: {' '.join(kws)}"
-    if specs:
-        search_summary += f" 规格:{' '.join(specs)}"
-    if brand:
-        search_summary += f" 品牌:{brand}"
-    search_summary += f", 找到{len(results)}个产品]"
-    if results:
-        top_names = "、".join(r["item_name"][:15] for r in results[:3])
-        search_summary += f" 代表: {top_names}"
+    draft = result["draft"]
+    yield "event: comparison_draft\ndata: " + json.dumps(draft, ensure_ascii=False, default=str) + "\n\n"
+    product_type = (
+        draft.get("structure", {}).get("specification", {}).get("productType")
+        or draft.get("structure", {}).get("category", {}).get("l3")
+        or "该产品"
+    )
+    text = f"已整理「{product_type}」的比价结构，请确认后开始查询京东工业品和震坤行。"
+    yield f"event: text\ndata: {json.dumps(text, ensure_ascii=False)}\n\n"
 
     ctx["conversation"].append({"role": "user", "content": user_message})
-    ctx["conversation"].append({"role": "assistant", "content": search_summary})
+    ctx["conversation"].append({"role": "assistant", "content": f"[已创建比价草稿: {product_type}]"})
 
-    # Step 5: Save memory before yielding done (runs concurrently, non-blocking)
-    logger.info(f"Scheduling memory save for user={effective_user_id[:8]}")
     asyncio.ensure_future(
         memory_service.save_session_summary(
             user_id=effective_user_id,
             user_message=user_message,
             intent=parsed,
-            results=results,
-            response_mode=response_mode,
-            query_type=query_type,
+            results=[],
+            response_mode="comparison_draft",
+            query_type=parsed.get("query_type", "comparison"),
         )
     )
 

@@ -68,7 +68,7 @@ async def get_session(session_id: str, user_id: str) -> Optional[dict]:
 
         msgs_r = await s.execute(
             text(
-                "SELECT id, role, content, image_data, sku_results, competitor_results, slot_clarification "
+                "SELECT id, role, content, image_data, sku_results, competitor_results, slot_clarification, comparison_draft "
                 "FROM t_chat_message WHERE session_id = :sid ORDER BY id"
             ),
             {"sid": session_id},
@@ -78,6 +78,7 @@ async def get_session(session_id: str, user_id: str) -> Optional[dict]:
             sku_results = json.loads(m[4]) if m[4] else None
             comp_results = json.loads(m[5]) if m[5] else None
             slot_clar = json.loads(m[6]) if m[6] else None
+            comparison_draft = json.loads(m[7]) if m[7] else None
             messages.append({
                 "id": str(m[0]),
                 "role": m[1],
@@ -86,6 +87,7 @@ async def get_session(session_id: str, user_id: str) -> Optional[dict]:
                 "skuResults": sku_results,
                 "competitorResults": comp_results,
                 "slotClarification": slot_clar,
+                "comparisonDraft": comparison_draft,
             })
 
         return {
@@ -122,7 +124,7 @@ async def get_recent_agent_context(
 
         result = await s.execute(
             text(
-                "SELECT role, content, sku_results, slot_clarification "
+                "SELECT role, content, sku_results, slot_clarification, comparison_draft "
                 "FROM t_chat_message WHERE session_id = :sid "
                 "ORDER BY id DESC LIMIT :lim"
             ),
@@ -131,10 +133,10 @@ async def get_recent_agent_context(
         rows = list(reversed(result.fetchall()))
 
     messages: list[dict] = []
-    for role, content, sku_results, slot_clarification in rows:
+    for role, content, sku_results, slot_clarification, comparison_draft in rows:
         if role not in {"user", "assistant"}:
             continue
-        text_content = _agent_context_text(role, content, sku_results, slot_clarification)
+        text_content = _agent_context_text(role, content, sku_results, slot_clarification, comparison_draft)
         if text_content:
             messages.append({"role": role, "content": text_content})
     return messages
@@ -145,10 +147,11 @@ def _agent_context_text(
     content: Optional[str],
     sku_results: Optional[str],
     slot_clarification: Optional[str],
+    comparison_draft: Optional[str] = None,
 ) -> str:
     text_content = (content or "").strip()
     if role == "assistant" and not text_content:
-        text_content = _structured_assistant_summary(sku_results, slot_clarification)
+        text_content = _structured_assistant_summary(sku_results, slot_clarification, comparison_draft)
     if len(text_content) > AGENT_CONTEXT_MAX_CHARS:
         return text_content[:AGENT_CONTEXT_MAX_CHARS] + "…"
     return text_content
@@ -157,7 +160,22 @@ def _agent_context_text(
 def _structured_assistant_summary(
     sku_results: Optional[str],
     slot_clarification: Optional[str],
+    comparison_draft: Optional[str] = None,
 ) -> str:
+    if comparison_draft:
+        try:
+            draft = json.loads(comparison_draft)
+            structure = draft.get("structure") or {}
+            spec = structure.get("specification") or {}
+            category = structure.get("category") or {}
+            product_type = spec.get("productType") or category.get("l3") or "未知产品"
+            terms = draft.get("searchTerms") or {}
+            first_term = (terms.get("jd") or terms.get("zkh") or [""])[0]
+            suffix = f" 搜索词:{first_term}" if first_term else ""
+            return f"[已创建比价草稿: {product_type}{suffix}]"
+        except Exception:
+            return "[已创建比价草稿]"
+
     if slot_clarification:
         try:
             slot = json.loads(slot_clarification)
@@ -228,6 +246,7 @@ async def save_turn(
     sku_results: Optional[list],
     competitor_results: Optional[list],
     slot_clarification: Optional[dict] = None,
+    comparison_draft: Optional[dict] = None,
 ) -> None:
     """
     Save one user/assistant turn. Creates the session row if needed; updates title from
@@ -294,8 +313,8 @@ async def save_turn(
             # Insert assistant message
             await s.execute(
                 text(
-                    "INSERT INTO t_chat_message (session_id, role, content, sku_results, competitor_results, slot_clarification) "
-                    "VALUES (:sid, 'assistant', :content, :sku, :comp, :slot)"
+                    "INSERT INTO t_chat_message (session_id, role, content, sku_results, competitor_results, slot_clarification, comparison_draft) "
+                    "VALUES (:sid, 'assistant', :content, :sku, :comp, :slot, :draft)"
                 ),
                 {
                     "sid": session_id,
@@ -303,6 +322,7 @@ async def save_turn(
                     "sku": json.dumps(sku_results, ensure_ascii=False) if sku_results else None,
                     "comp": json.dumps(competitor_results, ensure_ascii=False) if competitor_results else None,
                     "slot": json.dumps(slot_clarification, ensure_ascii=False) if slot_clarification else None,
+                    "draft": json.dumps(comparison_draft, ensure_ascii=False) if comparison_draft else None,
                 },
             )
 

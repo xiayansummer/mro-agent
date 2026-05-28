@@ -40,6 +40,26 @@ def test_agent_context_text_summarizes_sku_results():
     assert text == "[已展示产品: 不锈钢六角螺栓 M8、碳钢六角螺栓 M10]"
 
 
+def test_agent_context_text_summarizes_comparison_draft():
+    draft = {
+        "structure": {
+            "category": {"l3": "六角头螺栓"},
+            "specification": {"productType": "外六角螺栓"},
+        },
+        "searchTerms": {"jd": ["外六角螺栓 304 M8"]},
+    }
+
+    text = _agent_context_text(
+        role="assistant",
+        content="",
+        sku_results=None,
+        slot_clarification=None,
+        comparison_draft=json.dumps(draft, ensure_ascii=False),
+    )
+
+    assert text == "[已创建比价草稿: 外六角螺栓 搜索词:外六角螺栓 304 M8]"
+
+
 def test_agent_context_text_truncates_long_content():
     text = _agent_context_text(
         role="assistant",
