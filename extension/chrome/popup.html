@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="stylesheet" href="src/popup.css" />
+    <title>MRO 比价助手</title>
+  </head>
+  <body>
+    <main class="popup">
+      <header class="header">
+        <div>
+          <h1>MRO 比价助手</h1>
+          <p>Chrome 扩展 · 京东工业品 / 震坤行</p>
+        </div>
+        <span id="stateBadge" class="badge">未绑定</span>
+      </header>
+
+      <section class="card">
+        <label for="apiBase">后端地址</label>
+        <input id="apiBase" type="url" placeholder="http://localhost:8000/api" />
+        <p class="hint">本地开发默认使用 <code>http://localhost:8000/api</code>。</p>
+      </section>
+
+      <section id="pairingSection" class="card">
+        <label for="pairingCode">配对码</label>
+        <div class="row">
+          <input id="pairingCode" inputmode="numeric" maxlength="16" placeholder="输入 6 位配对码" />
+          <button id="pairButton">绑定</button>
+        </div>
+        <p class="hint">在 Web 端登录后生成配对码，5 分钟内输入。</p>
+      </section>
+
+      <section id="boundSection" class="card hidden">
+        <dl class="status-list">
+          <div>
+            <dt>设备</dt>
+            <dd id="deviceName">-</dd>
+          </div>
+          <div>
+            <dt>最近心跳</dt>
+            <dd id="lastHeartbeat">-</dd>
+          </div>
+        </dl>
+        <div class="actions">
+          <button id="heartbeatButton">立即上报状态</button>
+          <button id="resetButton" class="secondary">解除本机绑定</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <label>平台登录</label>
+        <div class="actions">
+          <button id="openJdLoginButton" class="secondary">打开京东登录</button>
+          <button id="openZkhLoginButton" class="secondary">打开震坤行登录</button>
+        </div>
+        <p class="hint">登录完成后点击“立即上报状态”，原查询内容会保留在 Web 比价卡片中。</p>
+      </section>
+
+      <p id="message" class="message"></p>
+    </main>
+    <script type="module" src="src/popup.js"></script>
+  </body>
+</html>

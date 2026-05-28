@@ -107,6 +107,8 @@ mro-agent/
             ├── api.ts               # SSE chat + feedback
             ├── auth.ts              # auth token localStorage
             └── chatHistory.ts       # server-side sessions
+└── extension/
+    └── chrome/                      # Chrome Manifest V3 比价扩展
 ```
 
 ## 快速部署
@@ -292,6 +294,17 @@ SSE 事件：
 | `POST` | `/api/feedback` | 保存 SKU 点赞/点踩反馈到 Memos |
 | `POST` | `/api/profile/import` | 导入 ERP 采购历史并生成偏好摘要 |
 | `GET` | `/api/competitor/search?q=...` | 检索竞品数据 |
+
+### Chrome 扩展
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| `POST` | `/api/extension/pairing-code` | Web 登录用户生成 5 分钟配对码 |
+| `POST` | `/api/extension/register` | 扩展用配对码注册并换取 `extToken` |
+| `GET` | `/api/extension/status` | Web 查询当前 active 扩展状态 |
+| `POST` | `/api/extension/status` | 扩展上报心跳、版本、设备名和平台登录态 |
+
+Chrome 扩展源码位于 `extension/chrome`，本地通过 `chrome://extensions/` 加载 unpacked 目录。
 
 ## AI 处理流程
 

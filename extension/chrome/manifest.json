@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "MRO 外部比价助手",
+  "description": "绑定 MRO Agent，用 Chrome 扩展执行京东工业品和震坤行搜索结果页采集。",
+  "version": "0.1.0",
+  "action": {
+    "default_title": "MRO 比价助手",
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "src/background.js",
+    "type": "module"
+  },
+  "permissions": [
+    "storage",
+    "tabs",
+    "alarms",
+    "scripting"
+  ],
+  "host_permissions": [
+    "http://localhost:8000/*",
+    "http://localhost:3000/*",
+    "https://mro.fultek.ai/*",
+    "https://*.jd.com/*",
+    "https://*.jd.hk/*",
+    "https://*.zkh.com/*"
+  ]
+}
