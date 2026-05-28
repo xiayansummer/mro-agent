@@ -94,3 +94,62 @@ def test_extension_next_task_returns_lease(monkeypatch):
 
     assert response.status_code == 200
     assert response.json()["subtaskId"] == "subtask-1"
+
+
+def test_extension_update_subtask_status(monkeypatch):
+    async def fake_update_subtask_status(**kwargs):
+        assert kwargs == {
+            "ext_token": "extension-token",
+            "subtask_id": "subtask-1",
+            "status": "failed",
+            "message": "boom",
+        }
+        return True
+
+    monkeypatch.setattr(extension.comparison_task_service, "update_subtask_status", fake_update_subtask_status)
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/extension/subtasks/subtask-1/status",
+        headers={"X-Extension-Token": "extension-token"},
+        json={"status": "failed", "message": "boom"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
+
+
+def test_extension_submit_subtask_results(monkeypatch):
+    async def fake_submit_subtask_results(**kwargs):
+        assert kwargs["ext_token"] == "extension-token"
+        assert kwargs["subtask_id"] == "subtask-1"
+        assert kwargs["platform"] == "jd"
+        assert kwargs["search_term"] == "term"
+        assert kwargs["offers"][0]["id"] == "offer-1"
+        return True
+
+    monkeypatch.setattr(extension.comparison_task_service, "submit_subtask_results", fake_submit_subtask_results)
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/extension/subtasks/subtask-1/results",
+        headers={"X-Extension-Token": "extension-token"},
+        json={
+            "platform": "jd",
+            "searchTerm": "term",
+            "offers": [
+                {
+                    "id": "offer-1",
+                    "platform": "jd",
+                    "title": "商品",
+                    "productUrl": "https://item.jd.com/1.html",
+                    "rawRank": 1,
+                    "unitComparable": False,
+                    "matchScore": 0,
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["ok"] is True

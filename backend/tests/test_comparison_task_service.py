@@ -107,6 +107,32 @@ class FakeSession:
                     ))
             return FakeResult()
 
+        if "UPDATE comparison_subtasks st" in sql and "JOIN comparison_tasks" in sql:
+            subtask = self.__class__.subtasks.get(params["subtask_id"])
+            if not subtask:
+                return FakeResult(rowcount=0)
+            task = self.__class__.tasks[subtask["task_id"]]
+            if task["user_id"] != params["uid"]:
+                return FakeResult(rowcount=0)
+            if "st.platform = :platform" in sql and subtask["platform"] != params["platform"]:
+                return FakeResult(rowcount=0)
+            subtask["status"] = params["status"]
+            subtask["error_json"] = params.get("error_json")
+            subtask["items_json"] = params.get("items_json", subtask["items_json"])
+            subtask["leased_until"] = None
+            return FakeResult(rowcount=1)
+
+        if "SELECT task_id FROM comparison_subtasks" in sql:
+            subtask = self.__class__.subtasks.get(params["subtask_id"])
+            return FakeResult((subtask["task_id"],) if subtask else None)
+
+        if "SELECT status, COUNT(*)" in sql:
+            counts = {}
+            for subtask in self.__class__.subtasks.values():
+                if subtask["task_id"] == params["task_id"]:
+                    counts[subtask["status"]] = counts.get(subtask["status"], 0) + 1
+            return FakeResult(rows=list(counts.items()))
+
         if "UPDATE comparison_subtasks" in sql:
             subtask = self.__class__.subtasks.get(params["id"])
             if not subtask:
@@ -120,6 +146,12 @@ class FakeSession:
 
         if "UPDATE comparison_tasks SET status" in sql:
             self.__class__.tasks[params["task_id"]]["status"] = params["status"]
+            return FakeResult()
+
+        if "UPDATE comparison_tasks" in sql and "completed_at" in sql:
+            task = self.__class__.tasks[params["task_id"]]
+            task["status"] = params["status"]
+            task["completed_at"] = params["completed_at"]
             return FakeResult()
 
         raise AssertionError(f"unexpected SQL: {sql}")
@@ -242,3 +274,65 @@ async def test_lease_next_subtask_marks_subtask_in_progress(monkeypatch):
     assert leased["searchTerms"] == ["jd term"]
     assert FakeSession.subtasks["subtask-1"]["status"] == "in_progress"
     assert FakeSession.tasks["task-1"]["status"] == "running"
+
+
+@pytest.mark.asyncio
+async def test_submit_subtask_results_scopes_by_extension_user(monkeypatch):
+    _seed_running_subtask()
+
+    async def fake_session(token):
+        return {"userId": 7}
+
+    monkeypatch.setattr(comparison_task_service.extension_service, "get_session_by_token", fake_session)
+
+    ok = await comparison_task_service.submit_subtask_results(
+        "token",
+        "subtask-1",
+        "jd",
+        "jd term",
+        [{"id": "offer-1", "platform": "jd", "title": "offer"}],
+    )
+
+    assert ok is True
+    assert FakeSession.subtasks["subtask-1"]["status"] == "done"
+    assert json.loads(FakeSession.subtasks["subtask-1"]["items_json"])[0]["selectedSearchTerm"] == "jd term"
+    assert FakeSession.tasks["task-1"]["status"] == "done"
+    assert FakeSession.tasks["task-1"]["completed_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_update_subtask_status_rejects_wrong_user(monkeypatch):
+    _seed_running_subtask()
+
+    async def fake_session(token):
+        return {"userId": 8}
+
+    monkeypatch.setattr(comparison_task_service.extension_service, "get_session_by_token", fake_session)
+
+    ok = await comparison_task_service.update_subtask_status("token", "subtask-1", "failed", "boom")
+
+    assert ok is False
+    assert FakeSession.subtasks["subtask-1"]["status"] == "in_progress"
+
+
+def _seed_running_subtask():
+    FakeSession.tasks["task-1"] = {
+        "id": "task-1",
+        "draft_id": "draft-1",
+        "user_id": 7,
+        "status": "running",
+        "created_at": datetime(2026, 1, 1),
+        "completed_at": None,
+    }
+    FakeSession.subtasks["subtask-1"] = {
+        "id": "subtask-1",
+        "task_id": "task-1",
+        "platform": "jd",
+        "status": "in_progress",
+        "search_terms_json": json.dumps(["jd term"]),
+        "items_json": None,
+        "error_json": None,
+        "leased_until": datetime(2026, 1, 1, 0, 1),
+        "created_at": datetime(2026, 1, 1),
+        "updated_at": datetime(2026, 1, 1),
+    }

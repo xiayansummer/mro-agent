@@ -105,19 +105,34 @@ async def get_next_task(
 
 @router.post("/extension/subtasks/{subtask_id}/status")
 async def update_subtask_status(
-    subtask_id: str,  # noqa: ARG001
-    req: UpdateSubtaskStatusRequest,  # noqa: ARG001
-    extension_token: str = Header(None, alias="X-Extension-Token"),  # noqa: ARG001
+    subtask_id: str,
+    req: UpdateSubtaskStatusRequest,
+    extension_token: str = Header(None, alias="X-Extension-Token"),
 ):
     require_extension_token(extension_token)
-    raise HTTPException(status_code=501, detail="extension subtask service not implemented")
+    if not await comparison_task_service.update_subtask_status(
+        ext_token=extension_token,
+        subtask_id=subtask_id,
+        status=req.status,
+        message=req.message,
+    ):
+        raise HTTPException(status_code=404, detail="任务不存在或状态无效")
+    return {"ok": True}
 
 
 @router.post("/extension/subtasks/{subtask_id}/results")
 async def submit_subtask_results(
-    subtask_id: str,  # noqa: ARG001
-    req: SubmitSubtaskResultsRequest,  # noqa: ARG001
-    extension_token: str = Header(None, alias="X-Extension-Token"),  # noqa: ARG001
+    subtask_id: str,
+    req: SubmitSubtaskResultsRequest,
+    extension_token: str = Header(None, alias="X-Extension-Token"),
 ):
     require_extension_token(extension_token)
-    raise HTTPException(status_code=501, detail="extension result service not implemented")
+    if not await comparison_task_service.submit_subtask_results(
+        ext_token=extension_token,
+        subtask_id=subtask_id,
+        platform=req.platform,
+        search_term=req.searchTerm,
+        offers=[offer.model_dump(mode="json") for offer in req.offers],
+    ):
+        raise HTTPException(status_code=404, detail="任务不存在或平台不匹配")
+    return {"ok": True}

@@ -210,6 +210,88 @@ async def lease_next_subtask(ext_token: str) -> Optional[dict]:
     }
 
 
+async def update_subtask_status(ext_token: str, subtask_id: str, status: str, message: Optional[str] = None) -> bool:
+    extension_session = await extension_service.get_session_by_token(ext_token)
+    if not extension_session or status not in {item.value for item in ComparisonSubtaskStatus}:
+        return False
+
+    error_json = _json({"message": message}) if message else None
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text(
+                """
+                UPDATE comparison_subtasks st
+                JOIN comparison_tasks t ON t.id = st.task_id
+                SET st.status = :status,
+                    st.error_json = :error_json,
+                    st.leased_until = NULL
+                WHERE st.id = :subtask_id AND t.user_id = :uid
+                """
+            ),
+            {
+                "status": status,
+                "error_json": error_json,
+                "subtask_id": subtask_id,
+                "uid": extension_session["userId"],
+            },
+        )
+        if result.rowcount <= 0:
+            await session.rollback()
+            return False
+        await _refresh_task_status(session, subtask_id)
+        await session.commit()
+    return True
+
+
+async def submit_subtask_results(
+    ext_token: str,
+    subtask_id: str,
+    platform: str,
+    search_term: str,
+    offers: list[dict],
+) -> bool:
+    extension_session = await extension_service.get_session_by_token(ext_token)
+    if not extension_session:
+        return False
+
+    items = [
+        {
+            **offer,
+            "selectedSearchTerm": search_term,
+        }
+        for offer in offers
+    ]
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text(
+                """
+                UPDATE comparison_subtasks st
+                JOIN comparison_tasks t ON t.id = st.task_id
+                SET st.status = :status,
+                    st.items_json = :items_json,
+                    st.error_json = NULL,
+                    st.leased_until = NULL
+                WHERE st.id = :subtask_id
+                  AND st.platform = :platform
+                  AND t.user_id = :uid
+                """
+            ),
+            {
+                "status": ComparisonSubtaskStatus.DONE.value,
+                "items_json": _json(items),
+                "subtask_id": subtask_id,
+                "platform": platform,
+                "uid": extension_session["userId"],
+            },
+        )
+        if result.rowcount <= 0:
+            await session.rollback()
+            return False
+        await _refresh_task_status(session, subtask_id)
+        await session.commit()
+    return True
+
+
 def _build_subtask_specs(
     selected_platforms: list[str],
     search_terms: dict,
@@ -259,6 +341,58 @@ def _row_to_subtask(row) -> dict:
         "createdAt": _millis(row[7]),
         "updatedAt": _millis(row[8]),
     }
+
+
+async def _refresh_task_status(session, subtask_id: str) -> None:
+    task_result = await session.execute(
+        text("SELECT task_id FROM comparison_subtasks WHERE id = :subtask_id"),
+        {"subtask_id": subtask_id},
+    )
+    task = task_result.fetchone()
+    if not task:
+        return
+
+    counts_result = await session.execute(
+        text(
+            """
+            SELECT status, COUNT(*)
+            FROM comparison_subtasks
+            WHERE task_id = :task_id
+            GROUP BY status
+            """
+        ),
+        {"task_id": task[0]},
+    )
+    counts = {row[0]: int(row[1]) for row in counts_result.fetchall()}
+    total = sum(counts.values())
+    done = counts.get(ComparisonSubtaskStatus.DONE.value, 0)
+    terminal = done + counts.get(ComparisonSubtaskStatus.FAILED.value, 0) + counts.get(
+        ComparisonSubtaskStatus.TIMEOUT.value, 0
+    ) + counts.get(ComparisonSubtaskStatus.LOGIN_REQUIRED.value, 0)
+
+    if total > 0 and done == total:
+        task_status = ComparisonTaskStatus.DONE.value
+        completed_at = datetime.utcnow()
+    elif total > 0 and terminal == total:
+        task_status = ComparisonTaskStatus.PARTIAL.value if done else ComparisonTaskStatus.FAILED.value
+        completed_at = datetime.utcnow()
+    elif counts.get(ComparisonSubtaskStatus.IN_PROGRESS.value, 0) > 0:
+        task_status = ComparisonTaskStatus.RUNNING.value
+        completed_at = None
+    else:
+        task_status = ComparisonTaskStatus.QUEUED.value
+        completed_at = None
+
+    await session.execute(
+        text(
+            """
+            UPDATE comparison_tasks
+            SET status = :status, completed_at = :completed_at
+            WHERE id = :task_id
+            """
+        ),
+        {"status": task_status, "completed_at": completed_at, "task_id": task[0]},
+    )
 
 
 def _require_db_user_id(user_id: str) -> int:
