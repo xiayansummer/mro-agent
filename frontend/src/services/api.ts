@@ -1,4 +1,4 @@
-import { SkuItem, CompetitorItem, SlotClarification } from "../types";
+import { SkuItem, CompetitorItem, SlotClarification, ComparisonDraft } from "../types";
 import { authHeader } from "./auth";
 
 export async function submitFeedback(
@@ -33,6 +33,7 @@ export interface SSECallbacks {
   onSkuResults: (results: SkuItem[]) => void;
   onCompetitorResults: (results: CompetitorItem[]) => void;
   onSlotClarification?: (slot: SlotClarification) => void;
+  onComparisonDraft?: (draft: ComparisonDraft) => void;
   onThinking: (msg: string) => void;
   onDone: () => void;
   onError: (err: string) => void;
@@ -104,6 +105,13 @@ export async function sendMessage(
           callbacks.onSlotClarification?.(JSON.parse(data));
         } catch (e) {
           console.error("Failed to parse slot_clarification:", e);
+        }
+        break;
+      case "comparison_draft":
+        try {
+          callbacks.onComparisonDraft?.(JSON.parse(data));
+        } catch (e) {
+          console.error("Failed to parse comparison_draft:", e);
         }
         break;
       case "thinking":

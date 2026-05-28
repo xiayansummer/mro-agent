@@ -38,6 +38,7 @@ export interface ChatMessage {
   isStreaming?: boolean;
   thinkingStatus?: string;
   slotClarification?: SlotClarification;
+  comparisonDraft?: ComparisonDraft;
 }
 
 export interface SlotMissing {
@@ -72,4 +73,134 @@ export interface AuthUser {
   nickname: string | null;
   user_id: string;     // external id used as user_id in chat/feedback requests
   auth_token: string;
+}
+
+export type ComparisonPlatform = "jd" | "zkh";
+
+export type ComparisonDraftStatus =
+  | "needs_confirmation"
+  | "needs_login"
+  | "ready_to_compare"
+  | "task_created"
+  | "cancelled";
+
+export type ComparisonTaskStatus =
+  | "queued"
+  | "running"
+  | "partial"
+  | "done"
+  | "failed"
+  | "cancelled";
+
+export type ComparisonSubtaskStatus =
+  | "queued"
+  | "in_progress"
+  | "login_required"
+  | "done"
+  | "timeout"
+  | "failed";
+
+export interface CategoryAlternative {
+  l1?: string;
+  l2?: string;
+  l3?: string;
+  l4?: string;
+  label: string;
+}
+
+export interface ComparisonCategory {
+  l1?: string;
+  l2?: string;
+  l3?: string;
+  l4?: string;
+  confidence: number;
+  alternatives?: CategoryAlternative[];
+}
+
+export interface SpecificationAttribute {
+  name: string;
+  value: string;
+  unit?: string;
+}
+
+export interface ComparisonSpecification {
+  productType?: string;
+  brand?: string;
+  model?: string;
+  material?: string;
+  size?: string;
+  standard?: string;
+  attributes: SpecificationAttribute[];
+  missing: string[];
+}
+
+export interface PurchaseConstraints {
+  quantity?: number;
+  unit?: string;
+  budgetMax?: number;
+  deliveryRequiredBy?: string;
+  preferredPlatforms: ComparisonPlatform[];
+  requireInStock?: boolean;
+}
+
+export interface ComparisonSearchTerms {
+  jd: string[];
+  zkh: string[];
+}
+
+export interface ComparisonStructure {
+  category: ComparisonCategory;
+  specification: ComparisonSpecification;
+  purchaseConstraints: PurchaseConstraints;
+  searchTerms: ComparisonSearchTerms;
+}
+
+export interface ExternalOffer {
+  id: string;
+  platform: ComparisonPlatform;
+  title: string;
+  brand?: string;
+  specText?: string;
+  priceText?: string;
+  priceValue?: number;
+  currency: "CNY";
+  unitText?: string;
+  normalizedUnitPrice?: number;
+  unitComparable: boolean;
+  minOrderQty?: string;
+  stockText?: string;
+  deliveryText?: string;
+  productUrl: string;
+  platformSku?: string;
+  rawRank: number;
+  matchScore: number;
+  matchReasons: string[];
+}
+
+export interface PlatformStatus {
+  platform: ComparisonPlatform;
+  loggedIn?: boolean;
+  checkedAt?: string;
+  message?: string;
+}
+
+export interface ExtensionStatus {
+  online: boolean;
+  deviceName?: string;
+  version?: string;
+  platforms: PlatformStatus[];
+  lastSeenAt?: string;
+}
+
+export interface ComparisonDraft {
+  id: string;
+  sessionId: string;
+  rawQuery: string;
+  structure: ComparisonStructure;
+  selectedPlatforms: ComparisonPlatform[];
+  searchTerms: ComparisonSearchTerms;
+  platformStatus?: PlatformStatus[] | null;
+  status: ComparisonDraftStatus;
+  createdAt: number;
+  updatedAt: number;
 }

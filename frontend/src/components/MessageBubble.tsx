@@ -4,6 +4,7 @@ import remarkGfm from "remark-gfm";
 import { ChatMessage } from "../types";
 import SkuCard from "./SkuCard";
 import SlotClarificationCard from "./SlotClarificationCard";
+import ComparisonDraftCard from "./ComparisonDraftCard";
 
 interface Props {
   message: ChatMessage;
@@ -105,6 +106,12 @@ export default function MessageBubble({ message, isFirst, sessionId, onChipSubmi
               disabled={!!message.slotClarification.submitted}
               onSubmit={(text) => onChipSubmit?.(text)}
             />
+          </div>
+        )}
+
+        {message.comparisonDraft && (
+          <div style={{ marginBottom: 12 }}>
+            <ComparisonDraftCard draft={message.comparisonDraft} />
           </div>
         )}
 
