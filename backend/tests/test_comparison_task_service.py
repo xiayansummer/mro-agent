@@ -107,6 +107,15 @@ class FakeSession:
                     ))
             return FakeResult()
 
+        if "SELECT d.structure_json" in sql:
+            subtask = self.__class__.subtasks.get(params["subtask_id"])
+            if not subtask:
+                return FakeResult()
+            task = self.__class__.tasks[subtask["task_id"]]
+            if task["user_id"] != params["uid"]:
+                return FakeResult()
+            return FakeResult((_structure_json(),))
+
         if "UPDATE comparison_subtasks st" in sql and "JOIN comparison_tasks" in sql:
             subtask = self.__class__.subtasks.get(params["subtask_id"])
             if not subtask:
@@ -175,6 +184,24 @@ def _subtask_row(subtask):
         subtask["created_at"],
         subtask["updated_at"],
     )
+
+
+def _structure_json():
+    return json.dumps({
+        "category": {"l3": "六角头螺栓", "confidence": 0.8, "alternatives": []},
+        "specification": {
+            "productType": "外六角螺栓",
+            "brand": None,
+            "model": None,
+            "material": "304",
+            "size": "M8",
+            "standard": None,
+            "attributes": [{"name": "规格", "value": "M8"}],
+            "missing": [],
+        },
+        "purchaseConstraints": {"preferredPlatforms": ["jd"]},
+        "searchTerms": {"jd": ["外六角螺栓 304 M8"], "zkh": []},
+    })
 
 
 @pytest.fixture(autouse=True)
@@ -290,12 +317,15 @@ async def test_submit_subtask_results_scopes_by_extension_user(monkeypatch):
         "subtask-1",
         "jd",
         "jd term",
-        [{"id": "offer-1", "platform": "jd", "title": "offer"}],
+        [{"id": "offer-1", "platform": "jd", "title": "304不锈钢外六角螺栓 M8"}],
     )
 
     assert ok is True
     assert FakeSession.subtasks["subtask-1"]["status"] == "done"
-    assert json.loads(FakeSession.subtasks["subtask-1"]["items_json"])[0]["selectedSearchTerm"] == "jd term"
+    item = json.loads(FakeSession.subtasks["subtask-1"]["items_json"])[0]
+    assert item["selectedSearchTerm"] == "jd term"
+    assert item["matchScore"] > 0
+    assert item["matchReasons"]
     assert FakeSession.tasks["task-1"]["status"] == "done"
     assert FakeSession.tasks["task-1"]["completed_at"] is not None
 

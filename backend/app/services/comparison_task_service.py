@@ -13,6 +13,7 @@ from app.models.comparison import (
     ExtensionStatus,
 )
 from app.services import extension_service
+from app.services.comparison_ranker import rank_external_offers
 from app.services.user_service import _external_id_to_db_id
 
 SUBTASK_LEASE_SECONDS = 90
@@ -254,14 +255,18 @@ async def submit_subtask_results(
     if not extension_session:
         return False
 
-    items = [
-        {
-            **offer,
-            "selectedSearchTerm": search_term,
-        }
-        for offer in offers
-    ]
     async with AsyncSessionLocal() as session:
+        structure = await _get_task_structure_for_subtask(session, subtask_id, extension_session["userId"])
+        if structure is None:
+            return False
+
+        items = [
+            {
+                **offer,
+                "selectedSearchTerm": search_term,
+            }
+            for offer in rank_external_offers(structure, offers)
+        ]
         result = await session.execute(
             text(
                 """
@@ -273,7 +278,7 @@ async def submit_subtask_results(
                     st.leased_until = NULL
                 WHERE st.id = :subtask_id
                   AND st.platform = :platform
-                  AND t.user_id = :uid
+                AND t.user_id = :uid
                 """
             ),
             {
@@ -290,6 +295,25 @@ async def submit_subtask_results(
         await _refresh_task_status(session, subtask_id)
         await session.commit()
     return True
+
+
+async def _get_task_structure_for_subtask(session, subtask_id: str, user_id: int) -> Optional[dict]:
+    result = await session.execute(
+        text(
+            """
+            SELECT d.structure_json
+            FROM comparison_subtasks st
+            JOIN comparison_tasks t ON t.id = st.task_id
+            JOIN comparison_drafts d ON d.id = t.draft_id
+            WHERE st.id = :subtask_id AND t.user_id = :uid
+            """
+        ),
+        {"subtask_id": subtask_id, "uid": user_id},
+    )
+    row = result.fetchone()
+    if not row:
+        return None
+    return _loads(row[0]) or {}
 
 
 def _build_subtask_specs(

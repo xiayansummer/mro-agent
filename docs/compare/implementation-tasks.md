@@ -230,6 +230,14 @@
 - 不上传 cookie/HTML 原文。
 - 解析失败有错误码。
 
+**验收命令**
+
+```bash
+node extension/chrome/scripts/validate-jd-search.mjs
+```
+
+默认关键词见 `extension/chrome/README.md`。脚本通过本机 Chrome 打开 JD 搜索结果页并复用扩展内同一套 parser，报告输出到 `extension/chrome/validation/jd-search-real-report.json`。JD 搜索页要求登录时，用 `--headless false --user-data-dir <dir> --login-wait-ms 120000` 建立独立验证 profile。
+
 ### CMP-304 回写结果和任务状态
 
 **范围**
