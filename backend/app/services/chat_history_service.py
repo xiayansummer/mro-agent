@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 MAX_SESSIONS_PER_USER = 200
 TITLE_MAX_LEN = 60
+AGENT_CONTEXT_MAX_CHARS = 800
 
 
 def _derive_title(first_user_msg: str) -> str:
@@ -94,6 +95,96 @@ async def get_session(session_id: str, user_id: str) -> Optional[dict]:
             "updatedAt": int(row[3].timestamp() * 1000) if row[3] else 0,
             "messages": messages,
         }
+
+
+async def get_recent_agent_context(
+    session_id: str,
+    user_id: str,
+    limit: int = 6,
+) -> list[dict]:
+    """Load recent messages for LLM conversation context, scoped to the owner.
+
+    The agent keeps an in-process cache for hot turns, but this DB-backed loader
+    is the source of truth after process restart or when traffic lands on another
+    backend replica.
+    """
+    db_id = _external_id_to_db_id(user_id)
+    if db_id is None:
+        return []
+
+    async with AsyncSessionLocal() as s:
+        owner = await s.execute(
+            text("SELECT 1 FROM t_chat_session WHERE id = :id AND user_id = :uid"),
+            {"id": session_id, "uid": db_id},
+        )
+        if not owner.fetchone():
+            return []
+
+        result = await s.execute(
+            text(
+                "SELECT role, content, sku_results, slot_clarification "
+                "FROM t_chat_message WHERE session_id = :sid "
+                "ORDER BY id DESC LIMIT :lim"
+            ),
+            {"sid": session_id, "lim": limit},
+        )
+        rows = list(reversed(result.fetchall()))
+
+    messages: list[dict] = []
+    for role, content, sku_results, slot_clarification in rows:
+        if role not in {"user", "assistant"}:
+            continue
+        text_content = _agent_context_text(role, content, sku_results, slot_clarification)
+        if text_content:
+            messages.append({"role": role, "content": text_content})
+    return messages
+
+
+def _agent_context_text(
+    role: str,
+    content: Optional[str],
+    sku_results: Optional[str],
+    slot_clarification: Optional[str],
+) -> str:
+    text_content = (content or "").strip()
+    if role == "assistant" and not text_content:
+        text_content = _structured_assistant_summary(sku_results, slot_clarification)
+    if len(text_content) > AGENT_CONTEXT_MAX_CHARS:
+        return text_content[:AGENT_CONTEXT_MAX_CHARS] + "…"
+    return text_content
+
+
+def _structured_assistant_summary(
+    sku_results: Optional[str],
+    slot_clarification: Optional[str],
+) -> str:
+    if slot_clarification:
+        try:
+            slot = json.loads(slot_clarification)
+            summary = slot.get("summary") or ""
+            missing = slot.get("missing") or []
+            questions = [
+                item.get("question", "")
+                for item in missing
+                if isinstance(item, dict) and item.get("question")
+            ]
+            return "待确认参数：" + "；".join([summary, *questions]).strip("；")
+        except Exception:
+            return "待确认参数"
+
+    if sku_results:
+        try:
+            skus = json.loads(sku_results)
+            names = [
+                str(item.get("item_name", ""))[:30]
+                for item in skus[:3]
+                if isinstance(item, dict) and item.get("item_name")
+            ]
+            if names:
+                return f"[已展示产品: {'、'.join(names)}]"
+        except Exception:
+            return "[已展示产品]"
+    return ""
 
 
 async def delete_session(session_id: str, user_id: str) -> bool:

@@ -3,6 +3,7 @@ import json
 import logging
 from collections.abc import AsyncGenerator
 from app.db.mysql import AsyncSessionLocal
+from app.services import chat_history_service
 from app.services.intent_parser import parse_intent
 from app.services.sku_search import search_skus, relaxed_search, attach_files, find_alternatives
 from app.services.competitor_search import search_ehsy
@@ -55,18 +56,33 @@ def _slot_clarification_event(parsed: dict, force_search: bool) -> str | None:
     return "event: slot_clarification\ndata: " + json.dumps(payload, ensure_ascii=False) + "\n\n"
 
 
-# In-memory session store for multi-turn conversations
+# In-memory session store for hot multi-turn conversations.
+# DB chat history is the source of truth for cold starts / multi-replica traffic.
 _sessions: dict[str, dict] = {}
 
 
-def get_session_context(session_id: str) -> dict:
+async def get_session_context(session_id: str, user_id: str = "") -> dict:
     if session_id not in _sessions:
         _sessions[session_id] = {
-            "conversation": [],
+            "conversation": await _load_session_conversation(session_id, user_id),
             "last_intent": None,
             "last_results": None,
         }
     return _sessions[session_id]
+
+
+async def _load_session_conversation(session_id: str, user_id: str) -> list[dict]:
+    if not user_id:
+        return []
+    try:
+        return await chat_history_service.get_recent_agent_context(
+            session_id=session_id,
+            user_id=user_id,
+            limit=6,
+        )
+    except Exception as e:
+        logger.warning("Failed to load DB-backed conversation context: %s", e)
+        return []
 
 
 async def handle_message(
@@ -79,7 +95,7 @@ async def handle_message(
     # Immediately acknowledge receipt so the UI shows activity
     yield "event: thinking\ndata: 正在理解需求...\n\n"
 
-    ctx = get_session_context(session_id)
+    ctx = await get_session_context(session_id, user_id)
 
     # Build conversation context for Claude (keep last 6 turns)
     conv_messages = ctx["conversation"][-6:]
