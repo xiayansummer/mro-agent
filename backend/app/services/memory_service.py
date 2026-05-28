@@ -52,6 +52,12 @@ class MemoryService:
             self._token = settings.MEMOS_ACCESS_TOKEN
             return self._token
 
+        if not settings.MEMOS_USERNAME or not settings.MEMOS_PASSWORD:
+            raise RuntimeError(
+                "Memos authentication is not configured. "
+                "Set MEMOS_ACCESS_TOKEN, or set both MEMOS_USERNAME and MEMOS_PASSWORD."
+            )
+
         # Option B: sign in with username/password
         async with self._make_client() as client:
             # Try sign-in first (normal case after first run)

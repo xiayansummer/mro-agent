@@ -39,6 +39,8 @@ def _to_out(user: dict) -> UserOut:
 
 @router.post("/auth/register", response_model=UserOut)
 async def register(req: RegisterRequest):
+    if settings.is_production and not settings.REGISTER_TOKEN:
+        raise HTTPException(status_code=503, detail="注册暂未开放")
     if settings.REGISTER_TOKEN and req.invite_token != settings.REGISTER_TOKEN:
         raise HTTPException(status_code=403, detail="邀请码错误")
     if not user_service.is_valid_phone(req.phone):
