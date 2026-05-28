@@ -1,0 +1,73 @@
+from fastapi.testclient import TestClient
+
+from app.main import app
+from app.models.comparison import ExtensionStatus
+from app.routers.auth import require_user_id
+from app.routers import extension
+
+
+def test_create_pairing_code_requires_web_auth():
+    client = TestClient(app)
+
+    response = client.post("/api/extension/pairing-code")
+
+    assert response.status_code == 401
+
+
+def test_create_pairing_code_returns_code_when_authenticated(monkeypatch):
+    async def fake_create_pairing_code(user_id):
+        assert user_id == "u1"
+        return {"code": "123456", "ttlSeconds": 300, "expiresAt": 1}
+
+    monkeypatch.setattr(extension.extension_service, "create_pairing_code", fake_create_pairing_code)
+    app.dependency_overrides[require_user_id] = lambda: "u1"
+    client = TestClient(app)
+    try:
+        response = client.post("/api/extension/pairing-code")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["code"] == "123456"
+
+
+def test_register_extension_rejects_bad_code(monkeypatch):
+    async def fake_register_extension(**kwargs):
+        return None
+
+    monkeypatch.setattr(extension.extension_service, "register_extension", fake_register_extension)
+    client = TestClient(app)
+
+    response = client.post("/api/extension/register", json={"code": "123456"})
+
+    assert response.status_code == 400
+
+
+def test_update_extension_status_requires_valid_extension_token(monkeypatch):
+    async def fake_update_extension_status(**kwargs):
+        return False
+
+    monkeypatch.setattr(extension.extension_service, "update_extension_status", fake_update_extension_status)
+    client = TestClient(app)
+
+    response = client.post("/api/extension/status", json={"platforms": []})
+
+    assert response.status_code == 401
+
+
+def test_get_web_extension_status(monkeypatch):
+    async def fake_get_extension_status(user_id):
+        assert user_id == "u1"
+        return ExtensionStatus(online=True, deviceName="Mac Chrome")
+
+    monkeypatch.setattr(extension.extension_service, "get_extension_status", fake_get_extension_status)
+    app.dependency_overrides[require_user_id] = lambda: "u1"
+    client = TestClient(app)
+    try:
+        response = client.get("/api/extension/status")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["online"] is True
+    assert response.json()["deviceName"] == "Mac Chrome"

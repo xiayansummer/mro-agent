@@ -1,7 +1,9 @@
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.models.comparison import ExtensionStatus
 from app.routers.auth import require_user_id
+from app.routers.comparison import extension_service
 
 
 def test_comparison_and_extension_health_are_public():
@@ -22,7 +24,11 @@ def test_comparison_extension_status_requires_web_auth():
     assert response.status_code == 401
 
 
-def test_comparison_extension_status_returns_default_when_authenticated():
+def test_comparison_extension_status_returns_default_when_authenticated(monkeypatch):
+    async def fake_get_extension_status(user_id):
+        return ExtensionStatus()
+
+    monkeypatch.setattr(extension_service, "get_extension_status", fake_get_extension_status)
     app.dependency_overrides[require_user_id] = lambda: "u1"
     client = TestClient(app)
     try:

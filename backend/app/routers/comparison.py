@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 
 from app.models.comparison import ComparisonStructure, ExtensionStatus, Platform
 from app.routers.auth import require_user_id
-from app.services import comparison_draft_service
+from app.services import comparison_draft_service, extension_service
 
 router = APIRouter()
 
@@ -81,6 +81,6 @@ async def get_task(
 
 @router.get("/comparison/extension/status", response_model=ExtensionStatus)
 async def get_extension_status(
-    user_id: str = Depends(require_user_id),  # noqa: ARG001
+    user_id: str = Depends(require_user_id),
 ):
-    return ExtensionStatus()
+    return await extension_service.get_extension_status(user_id)
