@@ -88,6 +88,18 @@ class FakeSession:
                     return FakeResult((1,))
             return FakeResult()
 
+        if "SELECT id, user_id, device_name" in sql:
+            for session in self.__class__.extension_sessions.values():
+                if session["ext_token_hash"] == params["token_hash"] and session["active"]:
+                    return FakeResult((
+                        session["id"],
+                        session["user_id"],
+                        session["device_name"],
+                        session["status_json"],
+                        session["last_seen_at"],
+                    ))
+            return FakeResult()
+
         raise AssertionError(f"unexpected SQL: {sql}")
 
     async def commit(self):
@@ -164,3 +176,16 @@ async def test_update_and_get_extension_status(monkeypatch):
 @pytest.mark.asyncio
 async def test_unknown_extension_token_is_invalid():
     assert await extension_service.is_valid_extension_token("missing") is False
+
+
+@pytest.mark.asyncio
+async def test_get_session_by_token_returns_user_scope(monkeypatch):
+    monkeypatch.setattr(extension_service, "_generate_pairing_code", lambda: "123456")
+    await extension_service.create_pairing_code("u7")
+    registered = await extension_service.register_extension("123456", "Mac Chrome", "0.1.0")
+
+    session = await extension_service.get_session_by_token(registered["extToken"])
+
+    assert session["userId"] == 7
+    assert session["deviceName"] == "Mac Chrome"
+    assert session["online"] is True

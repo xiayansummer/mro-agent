@@ -209,6 +209,32 @@ async def is_valid_extension_token(ext_token: str) -> bool:
         return result.fetchone() is not None
 
 
+async def get_session_by_token(ext_token: str) -> Optional[dict]:
+    if not ext_token:
+        return None
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text(
+                """
+                SELECT id, user_id, device_name, status_json, last_seen_at
+                FROM extension_sessions
+                WHERE ext_token_hash = :token_hash AND active = TRUE
+                """
+            ),
+            {"token_hash": _hash_secret(ext_token)},
+        )
+        row = result.fetchone()
+    if not row:
+        return None
+    return {
+        "id": row[0],
+        "userId": int(row[1]),
+        "deviceName": row[2],
+        "status": _status_from_row(row[2], row[3], row[4]),
+        "online": _is_online(row[4]),
+    }
+
+
 def _status_from_row(device_name: Optional[str], raw_status: Optional[str], last_seen_at) -> ExtensionStatus:
     if raw_status:
         try:

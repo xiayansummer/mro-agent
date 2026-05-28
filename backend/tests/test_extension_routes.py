@@ -71,3 +71,26 @@ def test_get_web_extension_status(monkeypatch):
     assert response.status_code == 200
     assert response.json()["online"] is True
     assert response.json()["deviceName"] == "Mac Chrome"
+
+
+def test_extension_next_task_returns_lease(monkeypatch):
+    async def fake_lease_next_subtask(token):
+        assert token == "extension-token"
+        return {
+            "subtaskId": "subtask-1",
+            "taskId": "task-1",
+            "platform": "jd",
+            "searchTerms": ["term"],
+            "leasedUntil": 1,
+        }
+
+    monkeypatch.setattr(extension.comparison_task_service, "lease_next_subtask", fake_lease_next_subtask)
+    client = TestClient(app)
+
+    response = client.get(
+        "/api/extension/tasks/next",
+        headers={"X-Extension-Token": "extension-token"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["subtaskId"] == "subtask-1"

@@ -6,12 +6,12 @@ slice will bind short-lived pairing codes to persistent extension sessions.
 """
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Response
 from pydantic import BaseModel, Field
 
 from app.models.comparison import ExternalOffer, ExtensionStatus, Platform, PlatformStatus
 from app.routers.auth import require_user_id
-from app.services import extension_service
+from app.services import comparison_task_service, extension_service
 
 router = APIRouter()
 
@@ -94,10 +94,13 @@ async def update_extension_status(
 
 @router.get("/extension/tasks/next")
 async def get_next_task(
-    extension_token: str = Header(None, alias="X-Extension-Token"),  # noqa: ARG001
+    extension_token: str = Header(None, alias="X-Extension-Token"),
 ):
     require_extension_token(extension_token)
-    raise HTTPException(status_code=501, detail="extension task lease service not implemented")
+    task = await comparison_task_service.lease_next_subtask(extension_token)
+    if not task:
+        return Response(status_code=204)
+    return task
 
 
 @router.post("/extension/subtasks/{subtask_id}/status")

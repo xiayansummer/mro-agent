@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 
 from app.models.comparison import ComparisonStructure, ExtensionStatus, Platform
 from app.routers.auth import require_user_id
-from app.services import comparison_draft_service, extension_service
+from app.services import comparison_draft_service, comparison_task_service, extension_service
 
 router = APIRouter()
 
@@ -65,18 +65,32 @@ async def update_draft(
 
 @router.post("/comparison/drafts/{draft_id}/confirm")
 async def confirm_draft(
-    draft_id: str,  # noqa: ARG001
-    user_id: str = Depends(require_user_id),  # noqa: ARG001
+    draft_id: str,
+    user_id: str = Depends(require_user_id),
 ):
-    raise HTTPException(status_code=501, detail="comparison task service not implemented")
+    task = await comparison_task_service.start_draft(draft_id, user_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="比价草稿不存在")
+    return task
+
+
+@router.post("/comparison/drafts/{draft_id}/start")
+async def start_draft(
+    draft_id: str,
+    user_id: str = Depends(require_user_id),
+):
+    return await confirm_draft(draft_id, user_id)
 
 
 @router.get("/comparison/tasks/{task_id}")
 async def get_task(
-    task_id: str,  # noqa: ARG001
-    user_id: str = Depends(require_user_id),  # noqa: ARG001
+    task_id: str,
+    user_id: str = Depends(require_user_id),
 ):
-    raise HTTPException(status_code=501, detail="comparison task service not implemented")
+    task = await comparison_task_service.get_task(task_id, user_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="比价任务不存在")
+    return task
 
 
 @router.get("/comparison/extension/status", response_model=ExtensionStatus)

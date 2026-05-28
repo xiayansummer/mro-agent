@@ -3,7 +3,7 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.models.comparison import ExtensionStatus
 from app.routers.auth import require_user_id
-from app.routers.comparison import extension_service
+from app.routers.comparison import comparison_task_service, extension_service
 
 
 def test_comparison_and_extension_health_are_public():
@@ -67,7 +67,12 @@ def test_extension_task_poll_requires_extension_token():
     assert response.status_code == 401
 
 
-def test_extension_task_poll_reaches_service_stub_with_token():
+def test_extension_task_poll_returns_204_when_no_task(monkeypatch):
+    async def fake_lease_next_subtask(token):
+        assert token == "extension-token"
+        return None
+
+    monkeypatch.setattr(comparison_task_service, "lease_next_subtask", fake_lease_next_subtask)
     client = TestClient(app)
 
     response = client.get(
@@ -75,4 +80,22 @@ def test_extension_task_poll_reaches_service_stub_with_token():
         headers={"X-Extension-Token": "extension-token"},
     )
 
-    assert response.status_code == 501
+    assert response.status_code == 204
+
+
+def test_start_draft_route_returns_task(monkeypatch):
+    async def fake_start_draft(draft_id, user_id):
+        assert draft_id == "draft-1"
+        assert user_id == "u1"
+        return {"id": "task-1", "draftId": "draft-1", "status": "queued", "subtasks": []}
+
+    monkeypatch.setattr(comparison_task_service, "start_draft", fake_start_draft)
+    app.dependency_overrides[require_user_id] = lambda: "u1"
+    client = TestClient(app)
+    try:
+        response = client.post("/api/comparison/drafts/draft-1/start")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["id"] == "task-1"
