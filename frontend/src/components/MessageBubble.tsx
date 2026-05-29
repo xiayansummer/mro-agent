@@ -15,6 +15,7 @@ interface Props {
   onChipSubmit?: (text: string) => void;
   onComparisonStart?: (messageId: string, draftId: string) => void;
   onComparisonRefresh?: (messageId: string, taskId: string) => void;
+  onComparisonRetry?: (messageId: string, taskId: string, platform: string) => void;
 }
 
 export default function MessageBubble({
@@ -24,6 +25,7 @@ export default function MessageBubble({
   onChipSubmit,
   onComparisonStart,
   onComparisonRefresh,
+  onComparisonRetry,
 }: Props) {
   const isUser = message.role === "user";
   const [copied, setCopied] = useState(false);
@@ -135,6 +137,7 @@ export default function MessageBubble({
             <ComparisonTaskCard
               task={message.comparisonTask as ComparisonTask}
               onRefresh={() => onComparisonRefresh?.(message.id, message.comparisonTask!.id)}
+              onRetryPlatform={(platform) => onComparisonRetry?.(message.id, message.comparisonTask!.id, platform)}
             />
           </div>
         )}

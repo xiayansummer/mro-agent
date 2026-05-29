@@ -117,7 +117,17 @@ class FakeSession:
             return FakeResult((_structure_json(),))
 
         if "UPDATE comparison_subtasks st" in sql and "JOIN comparison_tasks" in sql:
-            subtask = self.__class__.subtasks.get(params["subtask_id"])
+            subtask = self.__class__.subtasks.get(params.get("subtask_id"))
+            if not subtask and "task_id" in params:
+                subtask = next(
+                    (
+                        item
+                        for item in self.__class__.subtasks.values()
+                        if item["task_id"] == params["task_id"]
+                        and item["platform"] == params["platform"]
+                    ),
+                    None,
+                )
             if not subtask:
                 return FakeResult(rowcount=0)
             task = self.__class__.tasks[subtask["task_id"]]
@@ -125,9 +135,15 @@ class FakeSession:
                 return FakeResult(rowcount=0)
             if "st.platform = :platform" in sql and subtask["platform"] != params["platform"]:
                 return FakeResult(rowcount=0)
-            subtask["status"] = params["status"]
+            if "st.status IN" in sql and subtask["status"] not in {
+                params["login_required"],
+                params["failed"],
+                params["timeout"],
+            }:
+                return FakeResult(rowcount=0)
+            subtask["status"] = params.get("status", params.get("queued"))
             subtask["error_json"] = params.get("error_json")
-            subtask["items_json"] = params.get("items_json", subtask["items_json"])
+            subtask["items_json"] = params.get("items_json")
             subtask["leased_until"] = None
             return FakeResult(rowcount=1)
 
@@ -159,8 +175,10 @@ class FakeSession:
 
         if "UPDATE comparison_tasks" in sql and "completed_at" in sql:
             task = self.__class__.tasks[params["task_id"]]
+            if task["user_id"] != params.get("uid", task["user_id"]):
+                return FakeResult(rowcount=0)
             task["status"] = params["status"]
-            task["completed_at"] = params["completed_at"]
+            task["completed_at"] = params.get("completed_at")
             return FakeResult()
 
         raise AssertionError(f"unexpected SQL: {sql}")
@@ -343,6 +361,24 @@ async def test_update_subtask_status_rejects_wrong_user(monkeypatch):
 
     assert ok is False
     assert FakeSession.subtasks["subtask-1"]["status"] == "in_progress"
+
+
+@pytest.mark.asyncio
+async def test_retry_subtask_requeues_failed_platform():
+    _seed_running_subtask()
+    FakeSession.tasks["task-1"]["status"] = "partial"
+    FakeSession.tasks["task-1"]["completed_at"] = datetime(2026, 1, 1, 0, 2)
+    FakeSession.subtasks["subtask-1"]["status"] = "failed"
+    FakeSession.subtasks["subtask-1"]["items_json"] = json.dumps([{"id": "old"}])
+    FakeSession.subtasks["subtask-1"]["error_json"] = json.dumps({"message": "boom"})
+
+    task = await comparison_task_service.retry_subtask("task-1", "jd", "u7")
+
+    assert task["status"] == "queued"
+    assert task["subtasks"][0]["status"] == "queued"
+    assert task["subtasks"][0]["items"] == []
+    assert task["subtasks"][0]["error"] is None
+    assert FakeSession.tasks["task-1"]["completed_at"] is None
 
 
 def _seed_running_subtask():

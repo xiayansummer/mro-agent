@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { ChatMessage } from "../types";
-import { getComparisonTask, sendMessage, startComparisonDraft } from "../services/api";
+import { ChatMessage, ComparisonPlatform } from "../types";
+import { getComparisonTask, retryComparisonPlatform, sendMessage, startComparisonDraft } from "../services/api";
 import MessageBubble from "./MessageBubble";
 import ChatInput from "./ChatInput";
 
@@ -188,6 +188,18 @@ export default function ChatWindow({ sessionId, messages, onMessagesChange, onTo
     updateMessages(next);
   }, [updateMessages]);
 
+  const handleComparisonRetry = useCallback(async (
+    messageId: string,
+    taskId: string,
+    platform: string,
+  ) => {
+    const task = await retryComparisonPlatform(taskId, platform as ComparisonPlatform);
+    const next = messagesRef.current.map((m) =>
+      m.id === messageId ? { ...m, comparisonTask: task } : m
+    );
+    updateMessages(next);
+  }, [updateMessages]);
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", background: "var(--bg)", flex: 1, minWidth: 0 }}>
       {/* Header */}
@@ -263,6 +275,7 @@ export default function ChatWindow({ sessionId, messages, onMessagesChange, onTo
               onChipSubmit={(text) => handleSend(text)}
               onComparisonStart={handleComparisonStart}
               onComparisonRefresh={handleComparisonRefresh}
+              onComparisonRetry={handleComparisonRetry}
             />
           ))}
           <div ref={bottomRef} />

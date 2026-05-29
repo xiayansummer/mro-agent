@@ -99,3 +99,22 @@ def test_start_draft_route_returns_task(monkeypatch):
 
     assert response.status_code == 200
     assert response.json()["id"] == "task-1"
+
+
+def test_retry_task_platform_route_returns_task(monkeypatch):
+    async def fake_retry_subtask(task_id, platform, user_id):
+        assert task_id == "task-1"
+        assert platform == "jd"
+        assert user_id == "u1"
+        return {"id": "task-1", "draftId": "draft-1", "status": "queued", "subtasks": []}
+
+    monkeypatch.setattr(comparison_task_service, "retry_subtask", fake_retry_subtask)
+    app.dependency_overrides[require_user_id] = lambda: "u1"
+    client = TestClient(app)
+    try:
+        response = client.post("/api/comparison/tasks/task-1/retry", json={"platform": "jd"})
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "queued"

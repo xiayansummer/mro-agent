@@ -4,6 +4,7 @@ import { ComparisonPlatform, ComparisonSubtask, ComparisonTask, ExternalOffer } 
 interface Props {
   task: ComparisonTask;
   onRefresh?: () => void;
+  onRetryPlatform?: (platform: ComparisonPlatform) => void;
 }
 
 const PLATFORM_LABELS: Record<ComparisonPlatform, string> = {
@@ -23,7 +24,7 @@ const STATUS_LABELS: Record<string, string> = {
   timeout: "超时",
 };
 
-export default function ComparisonTaskCard({ task, onRefresh }: Props) {
+export default function ComparisonTaskCard({ task, onRefresh, onRetryPlatform }: Props) {
   const offers = task.subtasks.flatMap((subtask) =>
     subtask.items.map((item) => ({ ...item, platform: subtask.platform }))
   ).sort(compareOffers);
@@ -44,10 +45,11 @@ export default function ComparisonTaskCard({ task, onRefresh }: Props) {
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: offers.length ? 12 : 0 }}>
         {task.subtasks.map((subtask) => (
-          <span key={subtask.id} style={statusChipStyle(subtask.status)}>
-            {PLATFORM_LABELS[subtask.platform]} · {STATUS_LABELS[subtask.status] || subtask.status}
-            {subtask.items.length ? ` · ${subtask.items.length} 条` : ""}
-          </span>
+          <PlatformStatusChip
+            key={subtask.id}
+            subtask={subtask}
+            onRetryPlatform={onRetryPlatform}
+          />
         ))}
       </div>
 
@@ -70,6 +72,30 @@ export default function ComparisonTaskCard({ task, onRefresh }: Props) {
         </div>
       )}
     </div>
+  );
+}
+
+function PlatformStatusChip({
+  subtask,
+  onRetryPlatform,
+}: {
+  subtask: ComparisonSubtask;
+  onRetryPlatform?: (platform: ComparisonPlatform) => void;
+}) {
+  const retryable = ["login_required", "failed", "timeout"].includes(subtask.status);
+  return (
+    <span style={statusChipStyle(subtask.status)}>
+      {PLATFORM_LABELS[subtask.platform]} · {STATUS_LABELS[subtask.status] || subtask.status}
+      {subtask.items.length ? ` · ${subtask.items.length} 条` : ""}
+      {retryable && (
+        <button
+          onClick={() => onRetryPlatform?.(subtask.platform)}
+          style={retryButtonStyle}
+        >
+          重试
+        </button>
+      )}
+    </span>
   );
 }
 
@@ -192,6 +218,18 @@ const buttonStyle: CSSProperties = {
   padding: "4px 8px",
   fontSize: 12,
   cursor: "pointer",
+};
+
+const retryButtonStyle: CSSProperties = {
+  marginLeft: 6,
+  border: "none",
+  background: "transparent",
+  color: "inherit",
+  fontSize: 11,
+  fontWeight: 700,
+  cursor: "pointer",
+  padding: 0,
+  textDecoration: "underline",
 };
 
 const tableWrapStyle: CSSProperties = {

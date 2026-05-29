@@ -165,6 +165,51 @@ async def get_latest_task_for_draft(draft_id: str, user_id: str) -> Optional[dic
     return await get_task(row[0], user_id)
 
 
+async def retry_subtask(task_id: str, platform: str, user_id: str) -> Optional[dict]:
+    db_user_id = _require_db_user_id(user_id)
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text(
+                """
+                UPDATE comparison_subtasks st
+                JOIN comparison_tasks t ON t.id = st.task_id
+                SET st.status = :queued,
+                    st.items_json = NULL,
+                    st.error_json = NULL,
+                    st.leased_until = NULL
+                WHERE st.task_id = :task_id
+                  AND st.platform = :platform
+                  AND t.user_id = :uid
+                  AND st.status IN (:login_required, :failed, :timeout)
+                """
+            ),
+            {
+                "queued": ComparisonSubtaskStatus.QUEUED.value,
+                "task_id": task_id,
+                "platform": platform,
+                "uid": db_user_id,
+                "login_required": ComparisonSubtaskStatus.LOGIN_REQUIRED.value,
+                "failed": ComparisonSubtaskStatus.FAILED.value,
+                "timeout": ComparisonSubtaskStatus.TIMEOUT.value,
+            },
+        )
+        if result.rowcount <= 0:
+            await session.rollback()
+            return None
+        await session.execute(
+            text(
+                """
+                UPDATE comparison_tasks
+                SET status = :status, completed_at = NULL
+                WHERE id = :task_id AND user_id = :uid
+                """
+            ),
+            {"status": ComparisonTaskStatus.QUEUED.value, "task_id": task_id, "uid": db_user_id},
+        )
+        await session.commit()
+    return await get_task(task_id, user_id)
+
+
 async def lease_next_subtask(ext_token: str) -> Optional[dict]:
     extension_session = await extension_service.get_session_by_token(ext_token)
     if not extension_session:

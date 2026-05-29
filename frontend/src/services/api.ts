@@ -173,6 +173,22 @@ export async function getComparisonTask(taskId: string): Promise<ComparisonTask>
   return response.json();
 }
 
+export async function retryComparisonPlatform(
+  taskId: string,
+  platform: ComparisonTask["subtasks"][number]["platform"],
+): Promise<ComparisonTask> {
+  const response = await fetch(`${API_BASE}/comparison/tasks/${taskId}/retry`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeader() },
+    body: JSON.stringify({ platform }),
+  });
+  if (!response.ok) {
+    if (response.status === 401) window.dispatchEvent(new Event("mro:unauthorized"));
+    throw new Error(await responseText(response, "重试比价平台失败"));
+  }
+  return response.json();
+}
+
 async function responseText(response: Response, fallback: string): Promise<string> {
   try {
     const body = await response.json();

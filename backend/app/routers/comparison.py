@@ -18,6 +18,10 @@ class UpdateComparisonDraftRequest(BaseModel):
     selectedPlatforms: list[Platform] | None = None
 
 
+class RetryComparisonSubtaskRequest(BaseModel):
+    platform: Platform
+
+
 @router.get("/comparison/health")
 async def comparison_health():
     return {"status": "ok"}
@@ -90,6 +94,18 @@ async def get_task(
     task = await comparison_task_service.get_task(task_id, user_id)
     if not task:
         raise HTTPException(status_code=404, detail="比价任务不存在")
+    return task
+
+
+@router.post("/comparison/tasks/{task_id}/retry")
+async def retry_task_platform(
+    task_id: str,
+    req: RetryComparisonSubtaskRequest,
+    user_id: str = Depends(require_user_id),
+):
+    task = await comparison_task_service.retry_subtask(task_id, req.platform, user_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="比价任务不存在或平台不可重试")
     return task
 
 
