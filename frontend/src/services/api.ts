@@ -1,4 +1,12 @@
-import { SkuItem, CompetitorItem, SlotClarification, ComparisonDraft, ComparisonTask } from "../types";
+import {
+  SkuItem,
+  CompetitorItem,
+  SlotClarification,
+  ComparisonDraft,
+  ComparisonTask,
+  ExtensionPairingCode,
+  ExtensionStatus,
+} from "../types";
 import { authHeader } from "./auth";
 
 export async function submitFeedback(
@@ -185,6 +193,29 @@ export async function retryComparisonPlatform(
   if (!response.ok) {
     if (response.status === 401) window.dispatchEvent(new Event("mro:unauthorized"));
     throw new Error(await responseText(response, "重试比价平台失败"));
+  }
+  return response.json();
+}
+
+export async function getExtensionStatus(): Promise<ExtensionStatus> {
+  const response = await fetch(`${API_BASE}/extension/status`, {
+    headers: authHeader(),
+  });
+  if (!response.ok) {
+    if (response.status === 401) window.dispatchEvent(new Event("mro:unauthorized"));
+    throw new Error(await responseText(response, "获取扩展状态失败"));
+  }
+  return response.json();
+}
+
+export async function createExtensionPairingCode(): Promise<ExtensionPairingCode> {
+  const response = await fetch(`${API_BASE}/extension/pairing-code`, {
+    method: "POST",
+    headers: authHeader(),
+  });
+  if (!response.ok) {
+    if (response.status === 401) window.dispatchEvent(new Event("mro:unauthorized"));
+    throw new Error(await responseText(response, "生成扩展配对码失败"));
   }
   return response.json();
 }

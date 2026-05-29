@@ -193,6 +193,12 @@ export interface ExtensionStatus {
   lastSeenAt?: string;
 }
 
+export interface ExtensionPairingCode {
+  code: string;
+  expiresAt: number;
+  ttlSeconds: number;
+}
+
 export interface ComparisonDraft {
   id: string;
   sessionId: string;

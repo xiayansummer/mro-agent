@@ -1,5 +1,7 @@
-import { ComparisonDraft } from "../types";
+import { useEffect, useState } from "react";
+import { ComparisonDraft, ExtensionPairingCode, ExtensionStatus } from "../types";
 import type { CSSProperties } from "react";
+import { createExtensionPairingCode, getExtensionStatus } from "../services/api";
 
 interface Props {
   draft: ComparisonDraft;
@@ -13,6 +15,10 @@ const PLATFORM_LABELS: Record<string, string> = {
 };
 
 export default function ComparisonDraftCard({ draft, disabled, onStart }: Props) {
+  const [extensionStatus, setExtensionStatus] = useState<ExtensionStatus | null>(null);
+  const [pairingCode, setPairingCode] = useState<ExtensionPairingCode | null>(null);
+  const [loadingCode, setLoadingCode] = useState(false);
+  const [error, setError] = useState("");
   const { structure } = draft;
   const category = structure.category;
   const spec = structure.specification;
@@ -26,6 +32,25 @@ export default function ComparisonDraftCard({ draft, disabled, onStart }: Props)
     ["规格", spec.size],
     ["标准", spec.standard],
   ].filter(([, value]) => value);
+  const needsExtension = !extensionStatus?.online;
+
+  useEffect(() => {
+    getExtensionStatus()
+      .then(setExtensionStatus)
+      .catch(() => setExtensionStatus(null));
+  }, []);
+
+  async function handleCreatePairingCode() {
+    setLoadingCode(true);
+    setError("");
+    try {
+      setPairingCode(await createExtensionPairingCode());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "生成配对码失败");
+    } finally {
+      setLoadingCode(false);
+    }
+  }
 
   return (
     <div style={{
@@ -99,6 +124,37 @@ export default function ComparisonDraftCard({ draft, disabled, onStart }: Props)
             ))}
           </div>
         </section>
+
+        {needsExtension && (
+          <section style={pairingBoxStyle}>
+            <div style={labelStyle}>Chrome 扩展绑定</div>
+            <div style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.6 }}>
+              未检测到在线扩展。先安装并绑定 Chrome 扩展，绑定后本查询内容会保留，可直接点击开始比价。
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8, flexWrap: "wrap" }}>
+              <button
+                type="button"
+                onClick={handleCreatePairingCode}
+                disabled={loadingCode}
+                style={secondaryButtonStyle}
+              >
+                {loadingCode ? "生成中..." : "生成配对码"}
+              </button>
+              {pairingCode && (
+                <>
+                  <span style={codeStyle}>{pairingCode.code}</span>
+                  <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                    {new Date(pairingCode.expiresAt).toLocaleTimeString()} 前有效
+                  </span>
+                </>
+              )}
+            </div>
+            <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 6 }}>
+              扩展 popup 后端地址默认填 http://localhost:8000/api，输入配对码即可绑定。
+            </div>
+            {error && <div style={{ fontSize: 12, color: "#b91c1c", marginTop: 6 }}>{error}</div>}
+          </section>
+        )}
       </div>
 
       <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-end" }}>
@@ -142,4 +198,33 @@ const chipStyle: CSSProperties = {
   border: "1px solid var(--border)",
   borderRadius: 999,
   padding: "3px 8px",
+};
+
+const pairingBoxStyle: CSSProperties = {
+  border: "1px dashed var(--border)",
+  borderRadius: 8,
+  padding: 10,
+  background: "var(--bg)",
+};
+
+const secondaryButtonStyle: CSSProperties = {
+  border: "1px solid var(--border)",
+  borderRadius: 6,
+  background: "var(--surface)",
+  color: "var(--text-primary)",
+  padding: "5px 9px",
+  fontSize: 12,
+  cursor: "pointer",
+};
+
+const codeStyle: CSSProperties = {
+  fontFamily: "var(--mono)",
+  fontSize: 18,
+  letterSpacing: 2,
+  fontWeight: 700,
+  color: "var(--accent)",
+  background: "var(--surface)",
+  border: "1px solid var(--border)",
+  borderRadius: 6,
+  padding: "4px 10px",
 };
