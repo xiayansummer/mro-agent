@@ -238,7 +238,7 @@ export default function ChatWindow({ sessionId, messages, onMessagesChange, onTo
           </div>
           <div>
             <span style={{ fontWeight: 600, fontSize: 14, color: "var(--text-primary)" }}>
-              MRO 紧固件 AI 助手
+              MRO AI 助手
             </span>
             <span style={{
               marginLeft: 10, fontSize: 12, color: "var(--text-muted)",
