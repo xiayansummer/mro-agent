@@ -3,6 +3,8 @@ import type { CSSProperties } from "react";
 
 interface Props {
   draft: ComparisonDraft;
+  disabled?: boolean;
+  onStart?: () => void;
 }
 
 const PLATFORM_LABELS: Record<string, string> = {
@@ -10,7 +12,7 @@ const PLATFORM_LABELS: Record<string, string> = {
   zkh: "震坤行",
 };
 
-export default function ComparisonDraftCard({ draft }: Props) {
+export default function ComparisonDraftCard({ draft, disabled, onStart }: Props) {
   const { structure } = draft;
   const category = structure.category;
   const spec = structure.specification;
@@ -97,6 +99,25 @@ export default function ComparisonDraftCard({ draft }: Props) {
             ))}
           </div>
         </section>
+      </div>
+
+      <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-end" }}>
+        <button
+          disabled={disabled}
+          onClick={onStart}
+          style={{
+            border: "none",
+            borderRadius: 8,
+            background: disabled ? "var(--border)" : "var(--accent)",
+            color: "#fff",
+            padding: "7px 12px",
+            fontSize: 13,
+            fontWeight: 600,
+            cursor: disabled ? "not-allowed" : "pointer",
+          }}
+        >
+          {draft.status === "task_created" ? "已开始比价" : "确认并开始比价"}
+        </button>
       </div>
     </div>
   );

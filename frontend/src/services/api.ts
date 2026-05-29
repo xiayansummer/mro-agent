@@ -1,4 +1,4 @@
-import { SkuItem, CompetitorItem, SlotClarification, ComparisonDraft } from "../types";
+import { SkuItem, CompetitorItem, SlotClarification, ComparisonDraft, ComparisonTask } from "../types";
 import { authHeader } from "./auth";
 
 export async function submitFeedback(
@@ -147,5 +147,37 @@ export async function sendMessage(
         eventType = "";
       }
     }
+  }
+}
+
+export async function startComparisonDraft(draftId: string): Promise<ComparisonTask> {
+  const response = await fetch(`${API_BASE}/comparison/drafts/${draftId}/start`, {
+    method: "POST",
+    headers: authHeader(),
+  });
+  if (!response.ok) {
+    if (response.status === 401) window.dispatchEvent(new Event("mro:unauthorized"));
+    throw new Error(await responseText(response, "启动比价失败"));
+  }
+  return response.json();
+}
+
+export async function getComparisonTask(taskId: string): Promise<ComparisonTask> {
+  const response = await fetch(`${API_BASE}/comparison/tasks/${taskId}`, {
+    headers: authHeader(),
+  });
+  if (!response.ok) {
+    if (response.status === 401) window.dispatchEvent(new Event("mro:unauthorized"));
+    throw new Error(await responseText(response, "获取比价任务失败"));
+  }
+  return response.json();
+}
+
+async function responseText(response: Response, fallback: string): Promise<string> {
+  try {
+    const body = await response.json();
+    return body.detail || body.message || fallback;
+  } catch {
+    return `${fallback}: ${response.status}`;
   }
 }

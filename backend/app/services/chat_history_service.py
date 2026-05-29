@@ -79,6 +79,7 @@ async def get_session(session_id: str, user_id: str) -> Optional[dict]:
             comp_results = json.loads(m[5]) if m[5] else None
             slot_clar = json.loads(m[6]) if m[6] else None
             comparison_draft = json.loads(m[7]) if m[7] else None
+            comparison_task = await _comparison_task_for_draft(comparison_draft, user_id)
             messages.append({
                 "id": str(m[0]),
                 "role": m[1],
@@ -88,6 +89,7 @@ async def get_session(session_id: str, user_id: str) -> Optional[dict]:
                 "competitorResults": comp_results,
                 "slotClarification": slot_clar,
                 "comparisonDraft": comparison_draft,
+                "comparisonTask": comparison_task,
             })
 
         return {
@@ -97,6 +99,18 @@ async def get_session(session_id: str, user_id: str) -> Optional[dict]:
             "updatedAt": int(row[3].timestamp() * 1000) if row[3] else 0,
             "messages": messages,
         }
+
+
+async def _comparison_task_for_draft(comparison_draft: Optional[dict], user_id: str) -> Optional[dict]:
+    if not comparison_draft or not comparison_draft.get("id"):
+        return None
+    try:
+        from app.services import comparison_task_service
+
+        return await comparison_task_service.get_latest_task_for_draft(comparison_draft["id"], user_id)
+    except Exception:
+        logger.warning("failed to load comparison task for draft %s", comparison_draft.get("id"), exc_info=True)
+        return None
 
 
 async def get_recent_agent_context(

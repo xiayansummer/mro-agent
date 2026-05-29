@@ -144,6 +144,27 @@ async def get_task(task_id: str, user_id: str) -> Optional[dict]:
     }
 
 
+async def get_latest_task_for_draft(draft_id: str, user_id: str) -> Optional[dict]:
+    db_user_id = _require_db_user_id(user_id)
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text(
+                """
+                SELECT id
+                FROM comparison_tasks
+                WHERE draft_id = :draft_id AND user_id = :uid
+                ORDER BY created_at DESC, id DESC
+                LIMIT 1
+                """
+            ),
+            {"draft_id": draft_id, "uid": db_user_id},
+        )
+        row = result.fetchone()
+    if not row:
+        return None
+    return await get_task(row[0], user_id)
+
+
 async def lease_next_subtask(ext_token: str) -> Optional[dict]:
     extension_session = await extension_service.get_session_by_token(ext_token)
     if not extension_session:

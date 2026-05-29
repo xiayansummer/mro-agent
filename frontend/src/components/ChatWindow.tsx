@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { ChatMessage } from "../types";
-import { sendMessage } from "../services/api";
+import { getComparisonTask, sendMessage, startComparisonDraft } from "../services/api";
 import MessageBubble from "./MessageBubble";
 import ChatInput from "./ChatInput";
 
@@ -45,6 +45,31 @@ export default function ChatWindow({ sessionId, messages, onMessagesChange, onTo
 
   useEffect(() => { scrollToBottom(); }, [messages, scrollToBottom]);
   useEffect(() => { return () => abortRef.current?.abort(); }, []);
+  useEffect(() => {
+    const activeTaskMessages = messages.filter((message) =>
+      message.comparisonTask && ["queued", "running", "partial"].includes(message.comparisonTask.status)
+    );
+    if (activeTaskMessages.length === 0) return;
+
+    const timer = window.setInterval(async () => {
+      const updates = await Promise.allSettled(
+        activeTaskMessages.map((message) => getComparisonTask(message.comparisonTask!.id))
+      );
+      const taskById = new Map(
+        updates
+          .filter((result): result is PromiseFulfilledResult<Awaited<ReturnType<typeof getComparisonTask>>> => result.status === "fulfilled")
+          .map((result) => [result.value.id, result.value])
+      );
+      if (taskById.size === 0) return;
+      const next = messagesRef.current.map((message) => {
+        const taskId = message.comparisonTask?.id;
+        return taskId && taskById.has(taskId) ? { ...message, comparisonTask: taskById.get(taskId) } : message;
+      });
+      updateMessages(next);
+    }, 5000);
+
+    return () => window.clearInterval(timer);
+  }, [messages, updateMessages]);
 
   const handleScroll = useCallback(() => {
     const el = containerRef.current;
@@ -141,6 +166,28 @@ export default function ChatWindow({ sessionId, messages, onMessagesChange, onTo
     }
   };
 
+  const handleComparisonStart = useCallback(async (messageId: string, draftId: string) => {
+    const task = await startComparisonDraft(draftId);
+    const next = messagesRef.current.map((m) =>
+      m.id === messageId
+        ? {
+            ...m,
+            comparisonDraft: m.comparisonDraft ? { ...m.comparisonDraft, status: "task_created" as const } : m.comparisonDraft,
+            comparisonTask: task,
+          }
+        : m
+    );
+    updateMessages(next);
+  }, [updateMessages]);
+
+  const handleComparisonRefresh = useCallback(async (messageId: string, taskId: string) => {
+    const task = await getComparisonTask(taskId);
+    const next = messagesRef.current.map((m) =>
+      m.id === messageId ? { ...m, comparisonTask: task } : m
+    );
+    updateMessages(next);
+  }, [updateMessages]);
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", background: "var(--bg)", flex: 1, minWidth: 0 }}>
       {/* Header */}
@@ -214,6 +261,8 @@ export default function ChatWindow({ sessionId, messages, onMessagesChange, onTo
               isFirst={i === 0}
               sessionId={sessionId}
               onChipSubmit={(text) => handleSend(text)}
+              onComparisonStart={handleComparisonStart}
+              onComparisonRefresh={handleComparisonRefresh}
             />
           ))}
           <div ref={bottomRef} />

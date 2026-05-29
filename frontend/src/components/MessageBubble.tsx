@@ -5,15 +5,26 @@ import { ChatMessage } from "../types";
 import SkuCard from "./SkuCard";
 import SlotClarificationCard from "./SlotClarificationCard";
 import ComparisonDraftCard from "./ComparisonDraftCard";
+import ComparisonTaskCard from "./ComparisonTaskCard";
+import { ComparisonTask } from "../types";
 
 interface Props {
   message: ChatMessage;
   isFirst?: boolean;
   sessionId?: string;
   onChipSubmit?: (text: string) => void;
+  onComparisonStart?: (messageId: string, draftId: string) => void;
+  onComparisonRefresh?: (messageId: string, taskId: string) => void;
 }
 
-export default function MessageBubble({ message, isFirst, sessionId, onChipSubmit }: Props) {
+export default function MessageBubble({
+  message,
+  isFirst,
+  sessionId,
+  onChipSubmit,
+  onComparisonStart,
+  onComparisonRefresh,
+}: Props) {
   const isUser = message.role === "user";
   const [copied, setCopied] = useState(false);
 
@@ -111,7 +122,20 @@ export default function MessageBubble({ message, isFirst, sessionId, onChipSubmi
 
         {message.comparisonDraft && (
           <div style={{ marginBottom: 12 }}>
-            <ComparisonDraftCard draft={message.comparisonDraft} />
+            <ComparisonDraftCard
+              draft={message.comparisonDraft}
+              disabled={!!message.comparisonTask || message.comparisonDraft.status === "task_created"}
+              onStart={() => onComparisonStart?.(message.id, message.comparisonDraft!.id)}
+            />
+          </div>
+        )}
+
+        {message.comparisonTask && (
+          <div style={{ marginBottom: 12 }}>
+            <ComparisonTaskCard
+              task={message.comparisonTask as ComparisonTask}
+              onRefresh={() => onComparisonRefresh?.(message.id, message.comparisonTask!.id)}
+            />
           </div>
         )}
 

@@ -39,6 +39,7 @@ export interface ChatMessage {
   thinkingStatus?: string;
   slotClarification?: SlotClarification;
   comparisonDraft?: ComparisonDraft;
+  comparisonTask?: ComparisonTask;
 }
 
 export interface SlotMissing {
@@ -203,4 +204,25 @@ export interface ComparisonDraft {
   status: ComparisonDraftStatus;
   createdAt: number;
   updatedAt: number;
+}
+
+export interface ComparisonSubtask {
+  id: string;
+  platform: ComparisonPlatform;
+  status: ComparisonSubtaskStatus;
+  searchTerms: string[];
+  items: ExternalOffer[];
+  error?: { code?: string; message?: string } | null;
+  leasedUntil?: number | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ComparisonTask {
+  id: string;
+  draftId: string;
+  status: ComparisonTaskStatus;
+  createdAt: number;
+  completedAt?: number | null;
+  subtasks: ComparisonSubtask[];
 }
