@@ -11,6 +11,7 @@ import {
   updateSubtaskStatus,
 } from "./taskApi.js";
 import { runJdSearchTask } from "./jdSearch.js";
+import { runZkhSearchTask } from "./zkhSearch.js";
 
 let taskRunning = false;
 
@@ -75,7 +76,8 @@ async function pollAndRunNextTask() {
     const task = await fetchNextTask(settings.apiBase, settings.extToken);
     if (!task) return { skipped: true, reason: "no_task" };
 
-    if (task.platform !== "jd") {
+    const runner = getTaskRunner(task.platform);
+    if (!runner) {
       await updateSubtaskStatus(
         settings.apiBase,
         settings.extToken,
@@ -86,7 +88,7 @@ async function pollAndRunNextTask() {
       return { skipped: false, subtaskId: task.subtaskId, status: "failed" };
     }
 
-    const result = await runJdSearchTask(task);
+    const result = await runner(task);
     if (result.error && result.offers.length === 0) {
       await updateSubtaskStatus(
         settings.apiBase,
@@ -115,4 +117,10 @@ async function pollAndRunNextTask() {
   } finally {
     taskRunning = false;
   }
+}
+
+function getTaskRunner(platform) {
+  if (platform === "jd") return runJdSearchTask;
+  if (platform === "zkh") return runZkhSearchTask;
+  return null;
 }
