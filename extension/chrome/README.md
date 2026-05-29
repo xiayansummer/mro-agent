@@ -9,13 +9,14 @@
 3. 点击「加载已解压的扩展程序」
 4. 选择目录：`extension/chrome`
 
-## 本地绑定
+## 线上绑定
 
-1. 启动后端：`uvicorn app.main:app --reload --port 8000`
-2. Web 端登录后调用 `POST /api/extension/pairing-code` 生成配对码
+1. 打开 `https://mro.fultek.ai/` 并登录
+2. 在 Web 端生成配对码
 3. 打开扩展 popup
-4. 后端地址保持 `http://localhost:8000/api`
-5. 输入 6 位配对码并绑定
+4. 输入 6 位配对码并绑定
+
+扩展后端地址固定为 `https://mro.fultek.ai/api`，用户无需填写。
 
 绑定成功后：
 

@@ -1,7 +1,6 @@
 import { registerExtension } from "./api.js";
-import { getSettings, normalizeApiBase } from "./config.js";
+import { getSettings } from "./config.js";
 
-const apiBaseInput = document.querySelector("#apiBase");
 const pairingCodeInput = document.querySelector("#pairingCode");
 const pairButton = document.querySelector("#pairButton");
 const heartbeatButton = document.querySelector("#heartbeatButton");
@@ -17,13 +16,6 @@ const lastHeartbeatEl = document.querySelector("#lastHeartbeat");
 
 let settings = await getSettings();
 render();
-
-apiBaseInput.addEventListener("change", async () => {
-  settings.apiBase = normalizeApiBase(apiBaseInput.value);
-  await chrome.storage.local.set({ apiBase: settings.apiBase });
-  renderMessage("后端地址已保存。", "ok");
-  render();
-});
 
 pairButton.addEventListener("click", async () => {
   const code = pairingCodeInput.value.trim();
@@ -90,7 +82,6 @@ async function sendHeartbeatNow() {
 }
 
 function render() {
-  apiBaseInput.value = settings.apiBase;
   deviceNameEl.textContent = settings.deviceName || "-";
   lastHeartbeatEl.textContent = settings.lastHeartbeatAt
     ? new Date(settings.lastHeartbeatAt).toLocaleString()
