@@ -42,6 +42,55 @@ async def test_build_comparison_structure_for_clear_procurement_need(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_build_comparison_structure_asks_fastener_strength_before_draft(monkeypatch):
+    async def fake_parse_intent(*args, **kwargs):
+        return {
+            "l1_category": "紧固密封 框架结构",
+            "l2_category": "螺栓螺母",
+            "l3_category": "六角螺母",
+            "l4_category": None,
+            "keywords": ["六角螺母"],
+            "spec_keywords": ["M8"],
+            "brand": None,
+            "query_type": "broad_spec",
+            "attribute_gaps": ["强度等级", "材质"],
+        }
+
+    monkeypatch.setattr(comparison_structure, "parse_intent", fake_parse_intent)
+
+    result = await comparison_structure.build_comparison_structure("M8 六角螺母")
+
+    assert result.shouldCreateDraft is False
+    assert result.slotClarification is not None
+    missing = result.slotClarification["missing"]
+    assert any(item["key"] == "strength_grade" for item in missing)
+    assert any("8级" in item["options"] for item in missing if item["key"] == "strength_grade")
+
+
+@pytest.mark.asyncio
+async def test_build_comparison_structure_allows_fastener_after_chip_answer(monkeypatch):
+    async def fake_parse_intent(*args, **kwargs):
+        return {
+            "l1_category": "紧固密封 框架结构",
+            "l2_category": "螺栓螺母",
+            "l3_category": "六角螺母",
+            "l4_category": None,
+            "keywords": ["六角螺母"],
+            "spec_keywords": ["M8", "8级", "304", "不限品牌"],
+            "brand": None,
+            "query_type": "broad_spec",
+            "attribute_gaps": [],
+        }
+
+    monkeypatch.setattr(comparison_structure, "parse_intent", fake_parse_intent)
+
+    result = await comparison_structure.build_comparison_structure("M8 8级 304 不限品牌 六角螺母")
+
+    assert result.shouldCreateDraft is True
+    assert result.slotClarification is None
+
+
+@pytest.mark.asyncio
 async def test_build_comparison_structure_rejects_non_procurement_message(monkeypatch):
     async def fake_parse_intent(*args, **kwargs):
         return {

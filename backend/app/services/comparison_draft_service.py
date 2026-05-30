@@ -31,6 +31,7 @@ async def create_draft_from_message(
         return {
             "shouldCreateDraft": False,
             "guidance": result.guidance,
+            "slotClarification": result.slotClarification,
             "parsedIntent": result.parsedIntent,
         }
     return {

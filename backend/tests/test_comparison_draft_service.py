@@ -121,6 +121,45 @@ async def test_create_draft_persists_structure_and_search_terms():
 
 
 @pytest.mark.asyncio
+async def test_create_draft_from_message_returns_slot_clarification(monkeypatch):
+    class StructureResult:
+        shouldCreateDraft = False
+        structure = None
+        guidance = None
+        parsedIntent = {"query_type": "broad_spec"}
+        slotClarification = {
+            "summary": "需要采购 M8 六角螺母",
+            "known": [{"label": "规格", "value": "M8"}],
+            "missing": [
+                {
+                    "key": "strength_grade",
+                    "icon": "⚙️",
+                    "question": "需要什么强度等级？",
+                    "options": ["4级", "8级", "10级"],
+                }
+            ],
+        }
+
+    async def fake_build_comparison_structure(*args, **kwargs):
+        return StructureResult()
+
+    monkeypatch.setattr(
+        comparison_draft_service,
+        "build_comparison_structure",
+        fake_build_comparison_structure,
+    )
+
+    result = await comparison_draft_service.create_draft_from_message(
+        user_id="u7",
+        session_id="s1",
+        message="M8 六角螺母",
+    )
+
+    assert result["shouldCreateDraft"] is False
+    assert result["slotClarification"]["missing"][0]["key"] == "strength_grade"
+
+
+@pytest.mark.asyncio
 async def test_get_draft_is_scoped_by_user_id():
     created = await comparison_draft_service.create_draft("u7", "s1", "query", _structure())
 

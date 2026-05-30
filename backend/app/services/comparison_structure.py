@@ -18,6 +18,7 @@ class ComparisonStructureResult(BaseModel):
     shouldCreateDraft: bool
     structure: Optional[ComparisonStructure] = None
     guidance: Optional[str] = None
+    slotClarification: Optional[dict] = None
     parsedIntent: dict = Field(default_factory=dict)
 
 
@@ -40,6 +41,14 @@ async def build_comparison_structure(
         )
 
     structure = _structure_from_intent(user_message, parsed)
+    slot_clarification = _comparison_slot_clarification(parsed, structure)
+    if slot_clarification:
+        return ComparisonStructureResult(
+            shouldCreateDraft=False,
+            slotClarification=slot_clarification,
+            parsedIntent=parsed,
+        )
+
     if structure.category.confidence < 0.35 and not structure.specification.productType:
         return ComparisonStructureResult(
             shouldCreateDraft=False,
@@ -90,6 +99,141 @@ def _has_procurement_object(parsed: dict) -> bool:
         or parsed.get("brand")
         or parsed.get("spec_keywords")
     )
+
+
+def _comparison_slot_clarification(parsed: dict, structure: ComparisonStructure) -> Optional[dict]:
+    missing = []
+    spec = structure.specification
+    product_type = spec.productType or structure.category.l3 or structure.category.l2 or "该产品"
+    known = _known_params(parsed, structure)
+    spec_text = " ".join(str(value) for value in (parsed.get("spec_keywords") or [])).lower()
+    raw_text = " ".join(
+        str(value)
+        for value in [
+            parsed.get("inferred_need") or "",
+            *(parsed.get("keywords") or []),
+            *(parsed.get("spec_keywords") or []),
+        ]
+    )
+
+    if _is_threaded_fastener(structure):
+        if not spec.size:
+            missing.append({
+                "key": "size",
+                "icon": "📏",
+                "question": "需要什么规格尺寸？",
+                "options": ["M6", "M8", "M10", "M12", "其他规格"],
+            })
+        if _needs_strength_grade(parsed, structure, spec_text):
+            missing.append({
+                "key": "strength_grade",
+                "icon": "⚙️",
+                "question": "需要什么强度等级？",
+                "options": _strength_options(structure),
+            })
+        if not spec.material and not any(token in raw_text for token in ["碳钢", "不锈钢", "304", "316", "合金钢"]):
+            missing.append({
+                "key": "material",
+                "icon": "🔧",
+                "question": "需要什么材质？",
+                "options": ["碳钢", "304不锈钢", "316不锈钢", "合金钢", "其他材质"],
+            })
+
+    if _should_ask_brand(parsed, structure, len(missing)):
+        missing.append({
+            "key": "brand",
+            "icon": "🏷️",
+            "question": "有品牌偏好吗？",
+            "options": ["不限品牌", "晋亿", "固万基", "东明", "其他品牌"],
+        })
+
+    if not missing:
+        return None
+
+    return {
+        "summary": f"需要采购{product_type}，请先确认关键参数后再查询京东工业品和震坤行。",
+        "known": known,
+        "missing": missing[:3],
+    }
+
+
+def _known_params(parsed: dict, structure: ComparisonStructure) -> list[dict]:
+    known = []
+    spec = structure.specification
+    if spec.productType:
+        known.append({"label": "商品类型", "value": spec.productType})
+    if spec.size:
+        known.append({"label": "规格", "value": spec.size})
+    if spec.material:
+        known.append({"label": "材质", "value": spec.material})
+    if spec.brand:
+        known.append({"label": "品牌", "value": spec.brand})
+    for keyword in parsed.get("spec_keywords") or []:
+        value = str(keyword)
+        if _STRENGTH_RE.search(value) and not any(item["label"] == "强度等级" for item in known):
+            known.append({"label": "强度等级", "value": value})
+    return known
+
+
+def _is_threaded_fastener(structure: ComparisonStructure) -> bool:
+    text = " ".join(
+        value or ""
+        for value in [
+            structure.category.l2,
+            structure.category.l3,
+            structure.category.l4,
+            structure.specification.productType,
+        ]
+    )
+    return any(token in text for token in ["螺栓", "螺母", "螺钉", "螺丝"])
+
+
+_STRENGTH_RE = re.compile(r"(?:\b\d{1,2}(?:\.\d)?\s*级\b|\b\d{1,2}(?:\.\d)?\s*grade\b)", re.I)
+
+
+def _needs_strength_grade(parsed: dict, structure: ComparisonStructure, spec_text: str) -> bool:
+    if _STRENGTH_RE.search(spec_text):
+        return False
+    if parsed.get("query_type") == "precise":
+        return False
+    text = " ".join(
+        value or ""
+        for value in [
+            structure.category.l3,
+            structure.category.l4,
+            structure.specification.productType,
+        ]
+    )
+    return any(token in text for token in ["螺栓", "螺母", "螺钉", "螺丝"])
+
+
+def _strength_options(structure: ComparisonStructure) -> list[str]:
+    text = " ".join(
+        value or ""
+        for value in [
+            structure.category.l3,
+            structure.category.l4,
+            structure.specification.productType,
+        ]
+    )
+    if "螺母" in text:
+        return ["4级", "6级", "8级", "10级", "12级"]
+    return ["4.8级", "8.8级", "10.9级", "12.9级", "其他等级"]
+
+
+def _should_ask_brand(parsed: dict, structure: ComparisonStructure, missing_count: int) -> bool:
+    if parsed.get("query_type") == "precise":
+        return False
+    if missing_count >= 3 or structure.specification.brand:
+        return False
+    text = " ".join(str(value) for value in [
+        parsed.get("brand") or "",
+        *(parsed.get("keywords") or []),
+        *(parsed.get("spec_keywords") or []),
+    ])
+    if any(token in text for token in ["不限品牌", "任意品牌", "无品牌要求", "其他品牌"]):
+        return False
+    return _is_threaded_fastener(structure)
 
 
 def _category_confidence(parsed: dict) -> float:

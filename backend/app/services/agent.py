@@ -125,6 +125,16 @@ async def handle_message(
     parsed = result.get("parsedIntent") or {}
     ctx["last_intent"] = parsed
 
+    slot_clarification = result.get("slotClarification")
+    if slot_clarification:
+        yield "event: slot_clarification\ndata: " + json.dumps(slot_clarification, ensure_ascii=False) + "\n\n"
+        text = "请先通过上方卡片确认关键参数，确认后我再查询京东工业品和震坤行。"
+        yield f"event: text\ndata: {json.dumps(text, ensure_ascii=False)}\n\n"
+        ctx["conversation"].append({"role": "user", "content": user_message})
+        ctx["conversation"].append({"role": "assistant", "content": text})
+        yield "event: done\ndata: \n\n"
+        return
+
     if not result.get("shouldCreateDraft"):
         guidance = result.get("guidance") or "请补充产品名称、规格或采购约束。"
         yield f"event: text\ndata: {json.dumps(guidance, ensure_ascii=False)}\n\n"
