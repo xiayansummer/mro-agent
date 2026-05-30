@@ -41,6 +41,14 @@ async def build_comparison_structure(
         )
 
     structure = _structure_from_intent(user_message, parsed)
+    parsed_slot = _parsed_slot_clarification(parsed)
+    if parsed_slot:
+        return ComparisonStructureResult(
+            shouldCreateDraft=False,
+            slotClarification=parsed_slot,
+            parsedIntent=parsed,
+        )
+
     slot_clarification = _comparison_slot_clarification(parsed, structure)
     if slot_clarification:
         return ComparisonStructureResult(
@@ -101,6 +109,18 @@ def _has_procurement_object(parsed: dict) -> bool:
     )
 
 
+def _parsed_slot_clarification(parsed: dict) -> Optional[dict]:
+    if not parsed.get("need_clarification"):
+        return None
+    payload = parsed.get("slot_clarification")
+    if not isinstance(payload, dict):
+        return None
+    missing = payload.get("missing")
+    if not isinstance(missing, list) or not missing:
+        return None
+    return payload
+
+
 def _comparison_slot_clarification(parsed: dict, structure: ComparisonStructure) -> Optional[dict]:
     missing = []
     spec = structure.specification
@@ -138,13 +158,19 @@ def _comparison_slot_clarification(parsed: dict, structure: ComparisonStructure)
                 "question": "需要什么材质？",
                 "options": ["碳钢", "304不锈钢", "316不锈钢", "合金钢", "其他材质"],
             })
-
     if _should_ask_brand(parsed, structure, len(missing)):
         missing.append({
             "key": "brand",
             "icon": "🏷️",
             "question": "有品牌偏好吗？",
-            "options": ["不限品牌", "晋亿", "固万基", "东明", "其他品牌"],
+            "options": _brand_options(structure),
+        })
+    if _should_ask_quantity(structure, len(missing)):
+        missing.append({
+            "key": "quantity",
+            "icon": "📦",
+            "question": "本次大概采购数量是多少？",
+            "options": ["1件", "10件", "100件", "按平台起订量"],
         })
 
     if not missing:
@@ -172,6 +198,14 @@ def _known_params(parsed: dict, structure: ComparisonStructure) -> list[dict]:
         value = str(keyword)
         if _STRENGTH_RE.search(value) and not any(item["label"] == "强度等级" for item in known):
             known.append({"label": "强度等级", "value": value})
+    for attribute in spec.attributes:
+        if not attribute.value:
+            continue
+        if any(item["value"] == attribute.value for item in known):
+            continue
+        known.append({"label": attribute.name, "value": attribute.value})
+        if len(known) >= 5:
+            break
     return known
 
 
@@ -233,7 +267,30 @@ def _should_ask_brand(parsed: dict, structure: ComparisonStructure, missing_coun
     ])
     if any(token in text for token in ["不限品牌", "任意品牌", "无品牌要求", "其他品牌"]):
         return False
-    return _is_threaded_fastener(structure)
+    return _has_concrete_product_type(structure)
+
+
+def _should_ask_quantity(structure: ComparisonStructure, missing_count: int) -> bool:
+    if missing_count >= 3:
+        return False
+    constraints = structure.purchaseConstraints
+    if constraints.quantity is not None or constraints.unit:
+        return False
+    return _has_concrete_product_type(structure)
+
+
+def _has_concrete_product_type(structure: ComparisonStructure) -> bool:
+    return bool(
+        structure.specification.productType
+        or structure.category.l3
+        or structure.category.l4
+    )
+
+
+def _brand_options(structure: ComparisonStructure) -> list[str]:
+    if _is_threaded_fastener(structure):
+        return ["不限品牌", "晋亿", "固万基", "东明", "其他品牌"]
+    return ["不限品牌", "国产品牌", "进口品牌", "指定品牌", "其他品牌"]
 
 
 def _category_confidence(parsed: dict) -> float:

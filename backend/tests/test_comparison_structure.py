@@ -42,6 +42,77 @@ async def test_build_comparison_structure_for_clear_procurement_need(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_build_comparison_structure_uses_parsed_slot_clarification(monkeypatch):
+    async def fake_parse_intent(*args, **kwargs):
+        return {
+            "l1_category": "物料搬运 存储包装",
+            "l2_category": "起重工具及设备",
+            "l3_category": "葫芦绞车",
+            "l4_category": None,
+            "keywords": ["手拉葫芦"],
+            "spec_keywords": ["2吨"],
+            "brand": None,
+            "query_type": "broad_spec",
+            "attribute_gaps": ["品牌偏好", "起升高度"],
+            "need_clarification": True,
+            "slot_clarification": {
+                "summary": "需要采购手拉葫芦，请确认品牌和起升高度。",
+                "known": [{"label": "参数", "value": "2吨"}],
+                "missing": [
+                    {
+                        "key": "brand",
+                        "icon": "🏷️",
+                        "question": "有品牌偏好吗？",
+                        "options": ["不限品牌", "国产品牌", "进口品牌"],
+                    },
+                    {
+                        "key": "lifting_height",
+                        "icon": "📏",
+                        "question": "需要多大起升高度？",
+                        "options": ["3米", "6米", "9米"],
+                    },
+                ],
+            },
+        }
+
+    monkeypatch.setattr(comparison_structure, "parse_intent", fake_parse_intent)
+
+    result = await comparison_structure.build_comparison_structure("2 吨手拉葫芦")
+
+    assert result.shouldCreateDraft is False
+    assert result.slotClarification is not None
+    assert [item["key"] for item in result.slotClarification["missing"]] == ["brand", "lifting_height"]
+
+
+@pytest.mark.asyncio
+async def test_build_comparison_structure_asks_generic_brand_and_quantity(monkeypatch):
+    async def fake_parse_intent(*args, **kwargs):
+        return {
+            "l1_category": "物料搬运 存储包装",
+            "l2_category": "起重工具及设备",
+            "l3_category": "葫芦绞车",
+            "l4_category": None,
+            "keywords": ["手拉葫芦"],
+            "spec_keywords": ["2吨"],
+            "brand": None,
+            "query_type": "broad_spec",
+            "attribute_gaps": [],
+            "need_clarification": False,
+        }
+
+    monkeypatch.setattr(comparison_structure, "parse_intent", fake_parse_intent)
+
+    result = await comparison_structure.build_comparison_structure("2 吨手拉葫芦")
+
+    assert result.shouldCreateDraft is False
+    assert result.slotClarification is not None
+    missing = result.slotClarification["missing"]
+    assert any(item["key"] == "brand" for item in missing)
+    assert any(item["key"] == "quantity" for item in missing)
+    assert any(item["value"] == "2吨" for item in result.slotClarification["known"])
+
+
+@pytest.mark.asyncio
 async def test_build_comparison_structure_asks_fastener_strength_before_draft(monkeypatch):
     async def fake_parse_intent(*args, **kwargs):
         return {
@@ -84,7 +155,7 @@ async def test_build_comparison_structure_allows_fastener_after_chip_answer(monk
 
     monkeypatch.setattr(comparison_structure, "parse_intent", fake_parse_intent)
 
-    result = await comparison_structure.build_comparison_structure("M8 8级 304 不限品牌 六角螺母")
+    result = await comparison_structure.build_comparison_structure("M8 8级 304 不限品牌 六角螺母 买100个")
 
     assert result.shouldCreateDraft is True
     assert result.slotClarification is None
