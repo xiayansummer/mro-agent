@@ -57,7 +57,7 @@ export default function ComparisonTaskCard({ task, onRefresh, onRetryPlatform }:
         <div style={errorStyle}>
           {task.subtasks
             .filter((subtask) => subtask.error)
-            .map((subtask) => `${PLATFORM_LABELS[subtask.platform]}：${subtask.error?.message || subtask.error?.code || "执行失败"}`)
+            .map(formatSubtaskError)
             .join("；")}
         </div>
       )}
@@ -97,6 +97,18 @@ function PlatformStatusChip({
       )}
     </span>
   );
+}
+
+function formatSubtaskError(subtask: ComparisonSubtask) {
+  const message = subtask.error?.message || subtask.error?.code || "执行失败";
+  if (
+    subtask.platform === "jd"
+    && subtask.status === "failed"
+    && /未解析到搜索结果|登录|验证|captcha|安全验证/i.test(message)
+  ) {
+    return "京东工业品：可能需要重新验证登录态。请在 Chrome 扩展中打开京东登录，完成后点击“立即上报状态”，再回到本卡片重试。";
+  }
+  return `${PLATFORM_LABELS[subtask.platform]}：${message}`;
 }
 
 function ComparisonTable({ offers }: { offers: ExternalOffer[] }) {

@@ -30,6 +30,8 @@ export default function ChatWindow({ sessionId, messages, onMessagesChange, onTo
   const abortRef = useRef<AbortController | null>(null);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const wasNearBottomRef = useRef(true);
+  const previousMessageCountRef = useRef(messages.length);
 
   const updateMessages = useCallback(
     (msgs: ChatMessage[]) => {
@@ -43,7 +45,14 @@ export default function ChatWindow({ sessionId, messages, onMessagesChange, onTo
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, []);
 
-  useEffect(() => { scrollToBottom(); }, [messages, scrollToBottom]);
+  useEffect(() => {
+    const previousCount = previousMessageCountRef.current;
+    previousMessageCountRef.current = messages.length;
+    if (messages.length > previousCount || wasNearBottomRef.current) {
+      scrollToBottom();
+    }
+  }, [messages, scrollToBottom]);
+
   useEffect(() => { return () => abortRef.current?.abort(); }, []);
   useEffect(() => {
     const activeTaskMessages = messages.filter((message) =>
@@ -74,7 +83,9 @@ export default function ChatWindow({ sessionId, messages, onMessagesChange, onTo
   const handleScroll = useCallback(() => {
     const el = containerRef.current;
     if (!el) return;
-    setShowScrollBtn(el.scrollHeight - el.scrollTop - el.clientHeight > 150);
+    const awayFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight > 150;
+    wasNearBottomRef.current = !awayFromBottom;
+    setShowScrollBtn(awayFromBottom);
   }, []);
 
   const displayMessages = messages.length === 0 ? [WELCOME_MESSAGE] : messages;
@@ -88,6 +99,7 @@ export default function ChatWindow({ sessionId, messages, onMessagesChange, onTo
 
     const updated = [...messagesRef.current, userMsg, assistantMsg];
     updateMessages(updated);
+    wasNearBottomRef.current = true;
     setIsLoading(true);
 
     const abortController = new AbortController();
