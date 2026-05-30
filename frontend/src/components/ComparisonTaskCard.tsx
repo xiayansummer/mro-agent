@@ -82,7 +82,7 @@ function PlatformStatusChip({
   subtask: ComparisonSubtask;
   onRetryPlatform?: (platform: ComparisonPlatform) => void;
 }) {
-  const retryable = ["login_required", "failed", "timeout"].includes(subtask.status) && !isJdBlockedByVerification(subtask);
+  const retryable = ["login_required", "failed", "timeout"].includes(subtask.status);
   return (
     <span style={statusChipStyle(subtask.status)}>
       {PLATFORM_LABELS[subtask.platform]} · {STATUS_LABELS[subtask.status] || subtask.status}
@@ -102,7 +102,7 @@ function PlatformStatusChip({
 function formatSubtaskError(subtask: ComparisonSubtask) {
   const message = subtask.error?.message || subtask.error?.code || "执行失败";
   if (isJdBlockedByVerification(subtask)) {
-    return "京东工业品：当前触发登录/安全验证，暂不建议连续重试。已先展示其他平台结果；如需京东结果，请在浏览器完成京东验证后稍后重新发起比价。";
+    return "京东工业品：当前触发登录/安全验证。扩展会保留京东验证页，请先在插件里打开并完成验证，然后回到本卡片点击重试。";
   }
   return `${PLATFORM_LABELS[subtask.platform]}：${message}`;
 }

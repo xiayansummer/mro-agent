@@ -52,6 +52,11 @@ p {
   margin-bottom: 10px;
 }
 
+.card.warning {
+  border-color: #fed7aa;
+  background: #fff7ed;
+}
+
 label {
   display: block;
   color: #344054;

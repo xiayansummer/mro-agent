@@ -9,6 +9,7 @@ export async function getSettings() {
     "sessionId",
     "deviceName",
     "lastHeartbeatAt",
+    "pendingJdVerification",
   ]);
   return {
     apiBase: DEFAULT_API_BASE,
@@ -16,6 +17,7 @@ export async function getSettings() {
     sessionId: stored.sessionId || "",
     deviceName: stored.deviceName || defaultDeviceName(),
     lastHeartbeatAt: stored.lastHeartbeatAt || "",
+    pendingJdVerification: stored.pendingJdVerification || null,
   };
 }
 

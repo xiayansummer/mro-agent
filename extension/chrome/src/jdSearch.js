@@ -42,6 +42,7 @@ async function collectJdSearchResults(searchTerm) {
     url: buildJdSearchUrl(searchTerm),
     active: false,
   });
+  let keepOpenForUserAction = false;
   try {
     await waitForTabLoad(tab.id, TERM_TIMEOUT_MS);
     await sleep(1200);
@@ -57,9 +58,23 @@ async function collectJdSearchResults(searchTerm) {
       target: { tabId: tab.id },
       func: detectJdSearchIssue,
     });
-    return { offers, error: diagnostics?.result || "" };
+    const issue = diagnostics?.result || {};
+    if (issue.requiresUserAction) {
+      keepOpenForUserAction = true;
+      await chrome.tabs.update(tab.id, { active: true }).catch(() => {});
+      await chrome.storage.local.set({
+        pendingJdVerification: {
+          tabId: tab.id,
+          url: issue.url || "",
+          message: issue.message,
+          searchTerm,
+          createdAt: new Date().toISOString(),
+        },
+      });
+    }
+    return { offers, error: issue.message || "" };
   } finally {
-    if (tab.id) {
+    if (tab.id && !keepOpenForUserAction) {
       await chrome.tabs.remove(tab.id).catch(() => {});
     }
   }
@@ -69,15 +84,31 @@ function detectJdSearchIssue() {
   const text = document.body?.innerText || "";
   const currentUrl = location.href;
   if (/passport\.jd\.com|\/login/.test(currentUrl) || /请登录|账户登录|扫码登录/.test(text)) {
-    return "京东登录态失效，请在 Chrome 扩展中重新打开京东登录。";
+    return {
+      message: "京东需要登录。已保留京东页面，请完成登录后回到比价卡片重试。",
+      requiresUserAction: true,
+      url: currentUrl,
+    };
   }
   if (/验证码|安全验证|滑块|风险|验证身份|verify|captcha/i.test(text + " " + currentUrl)) {
-    return "京东触发安全验证，扩展暂时无法自动采集。请在浏览器完成验证后稍后重试。";
+    return {
+      message: "京东触发安全验证。已保留京东页面，请完成验证后回到比价卡片重试。",
+      requiresUserAction: true,
+      url: currentUrl,
+    };
   }
   if (!/(^|\.)search\.jd\.com$/.test(location.hostname)) {
-    return "京东搜索页被重定向，可能触发平台风控。";
+    return {
+      message: "京东搜索页被重定向，可能触发平台风控。已保留页面，请检查后回到比价卡片重试。",
+      requiresUserAction: true,
+      url: currentUrl,
+    };
   }
-  return "京东未解析到搜索结果，可能是页面结构变化或平台风控。";
+  return {
+    message: "京东未解析到搜索结果，可能是页面结构变化或平台风控。",
+    requiresUserAction: false,
+    url: currentUrl,
+  };
 }
 
 function buildJdSearchUrl(searchTerm) {

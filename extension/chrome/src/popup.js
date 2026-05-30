@@ -13,6 +13,10 @@ const pairingSection = document.querySelector("#pairingSection");
 const boundSection = document.querySelector("#boundSection");
 const deviceNameEl = document.querySelector("#deviceName");
 const lastHeartbeatEl = document.querySelector("#lastHeartbeat");
+const jdVerificationSection = document.querySelector("#jdVerificationSection");
+const jdVerificationMessage = document.querySelector("#jdVerificationMessage");
+const openPendingJdButton = document.querySelector("#openPendingJdButton");
+const clearPendingJdButton = document.querySelector("#clearPendingJdButton");
 
 let settings = await getSettings();
 render();
@@ -65,6 +69,38 @@ openZkhLoginButton.addEventListener("click", async () => {
   await openPlatformLogin("zkh");
 });
 
+openPendingJdButton.addEventListener("click", async () => {
+  const pending = settings.pendingJdVerification;
+  if (!pending?.tabId && !pending?.url) {
+    renderMessage("没有待处理的京东验证页。", "error");
+    return;
+  }
+  try {
+    if (pending.tabId) {
+      await chrome.tabs.update(pending.tabId, { active: true });
+      const tab = await chrome.tabs.get(pending.tabId);
+      if (tab.windowId) await chrome.windows.update(tab.windowId, { focused: true });
+    } else {
+      await chrome.tabs.create({ url: pending.url, active: true });
+    }
+    renderMessage("已打开京东验证页。完成后回 Web 卡片重试。", "ok");
+  } catch {
+    if (pending.url) {
+      await chrome.tabs.create({ url: pending.url, active: true });
+      renderMessage("已重新打开京东验证页。完成后回 Web 卡片重试。", "ok");
+      return;
+    }
+    renderMessage("打开京东验证页失败。", "error");
+  }
+});
+
+clearPendingJdButton.addEventListener("click", async () => {
+  await chrome.storage.local.remove(["pendingJdVerification"]);
+  settings = await getSettings();
+  render();
+  renderMessage("已清除京东验证提示。", "ok");
+});
+
 async function sendHeartbeatNow() {
   heartbeatButton.disabled = true;
   renderMessage("正在上报状态...", "");
@@ -97,6 +133,13 @@ function render() {
     stateBadge.className = "badge";
     pairingSection.classList.remove("hidden");
     boundSection.classList.add("hidden");
+  }
+
+  if (settings.pendingJdVerification) {
+    jdVerificationSection.classList.remove("hidden");
+    jdVerificationMessage.textContent = settings.pendingJdVerification.message || "京东触发验证，请先完成验证。";
+  } else {
+    jdVerificationSection.classList.add("hidden");
   }
 }
 
