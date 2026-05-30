@@ -82,7 +82,7 @@ function PlatformStatusChip({
   subtask: ComparisonSubtask;
   onRetryPlatform?: (platform: ComparisonPlatform) => void;
 }) {
-  const retryable = ["login_required", "failed", "timeout"].includes(subtask.status);
+  const retryable = ["login_required", "failed", "timeout"].includes(subtask.status) && !isJdBlockedByVerification(subtask);
   return (
     <span style={statusChipStyle(subtask.status)}>
       {PLATFORM_LABELS[subtask.platform]} · {STATUS_LABELS[subtask.status] || subtask.status}
@@ -101,14 +101,19 @@ function PlatformStatusChip({
 
 function formatSubtaskError(subtask: ComparisonSubtask) {
   const message = subtask.error?.message || subtask.error?.code || "执行失败";
-  if (
-    subtask.platform === "jd"
-    && subtask.status === "failed"
-    && /未解析到搜索结果|登录|验证|captcha|安全验证/i.test(message)
-  ) {
-    return "京东工业品：可能需要重新验证登录态。请在 Chrome 扩展中打开京东登录，完成后点击“立即上报状态”，再回到本卡片重试。";
+  if (isJdBlockedByVerification(subtask)) {
+    return "京东工业品：当前触发登录/安全验证，暂不建议连续重试。已先展示其他平台结果；如需京东结果，请在浏览器完成京东验证后稍后重新发起比价。";
   }
   return `${PLATFORM_LABELS[subtask.platform]}：${message}`;
+}
+
+function isJdBlockedByVerification(subtask: ComparisonSubtask) {
+  const message = `${subtask.error?.message || ""} ${subtask.error?.code || ""}`;
+  return (
+    subtask.platform === "jd"
+    && ["failed", "login_required", "timeout"].includes(subtask.status)
+    && /未解析到搜索结果|登录|验证|captcha|安全验证|风控|重定向/i.test(message)
+  );
 }
 
 function ComparisonTable({ offers }: { offers: ExternalOffer[] }) {
