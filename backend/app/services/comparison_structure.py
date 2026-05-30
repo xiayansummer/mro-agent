@@ -98,7 +98,14 @@ def _structure_from_intent(user_message: str, parsed: dict) -> ComparisonStructu
 
 
 def _has_procurement_object(parsed: dict) -> bool:
-    if parsed.get("query_type") == "vague" and not parsed.get("keywords") and not parsed.get("l3_category"):
+    if (
+        parsed.get("query_type") == "vague"
+        and not parsed.get("keywords")
+        and not parsed.get("l3_category")
+        and not parsed.get("l4_category")
+        and not parsed.get("brand")
+        and not parsed.get("spec_keywords")
+    ):
         return False
     return bool(
         parsed.get("keywords")

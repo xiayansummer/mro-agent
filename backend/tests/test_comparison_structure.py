@@ -42,6 +42,45 @@ async def test_build_comparison_structure_for_clear_procurement_need(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_build_comparison_structure_asks_category_for_brand_only(monkeypatch):
+    async def fake_parse_intent(*args, **kwargs):
+        return {
+            "l1_category": None,
+            "l2_category": None,
+            "l3_category": None,
+            "l4_category": None,
+            "keywords": [],
+            "spec_keywords": [],
+            "brand": "诺霸",
+            "query_type": "vague",
+            "attribute_gaps": [],
+            "need_clarification": True,
+            "slot_clarification": {
+                "summary": "需要采购诺霸品牌的产品",
+                "known": [{"label": "品牌", "value": "诺霸"}],
+                "missing": [
+                    {
+                        "key": "product_type",
+                        "icon": "📦",
+                        "question": "您需要哪类诺霸产品？",
+                        "options": ["扭力扳手", "棘轮扳手", "螺丝批头"],
+                    }
+                ],
+            },
+        }
+
+    monkeypatch.setattr(comparison_structure, "parse_intent", fake_parse_intent)
+
+    result = await comparison_structure.build_comparison_structure("诺霸")
+
+    assert result.shouldCreateDraft is False
+    assert result.guidance is None
+    assert result.slotClarification is not None
+    assert result.slotClarification["known"] == [{"label": "品牌", "value": "诺霸"}]
+    assert result.slotClarification["missing"][0]["key"] == "product_type"
+
+
+@pytest.mark.asyncio
 async def test_build_comparison_structure_uses_parsed_slot_clarification(monkeypatch):
     async def fake_parse_intent(*args, **kwargs):
         return {
