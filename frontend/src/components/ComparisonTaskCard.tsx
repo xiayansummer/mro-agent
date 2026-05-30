@@ -28,6 +28,7 @@ export default function ComparisonTaskCard({ task, onRefresh, onRetryPlatform }:
   const offers = task.subtasks.flatMap((subtask) =>
     subtask.items.map((item) => ({ ...item, platform: subtask.platform }))
   ).sort(compareOffers);
+  const progress = getTaskProgress(task);
 
   return (
     <div style={cardStyle}>
@@ -42,6 +43,10 @@ export default function ComparisonTaskCard({ task, onRefresh, onRetryPlatform }:
         </div>
         <button onClick={onRefresh} style={buttonStyle}>刷新</button>
       </div>
+
+      {!progress.isTerminal && (
+        <TaskProgress task={task} progress={progress} />
+      )}
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: offers.length ? 12 : 0 }}>
         {task.subtasks.map((subtask) => (
@@ -67,10 +72,40 @@ export default function ComparisonTaskCard({ task, onRefresh, onRetryPlatform }:
       ) : (
         <div style={emptyStyle}>
           {task.status === "queued" || task.status === "running"
-            ? "扩展正在查询外部平台，稍后刷新查看结果。"
+            ? "扩展正在查询外部平台，本卡片会自动刷新进度。"
             : "当前还没有可展示的外部候选。"}
         </div>
       )}
+    </div>
+  );
+}
+
+function TaskProgress({
+  task,
+  progress,
+}: {
+  task: ComparisonTask;
+  progress: ReturnType<typeof getTaskProgress>;
+}) {
+  const activePlatforms = task.subtasks
+    .filter((subtask) => ["queued", "in_progress"].includes(subtask.status))
+    .map((subtask) => PLATFORM_LABELS[subtask.platform])
+    .join("、");
+  const updatedAt = Math.max(...task.subtasks.map((subtask) => subtask.updatedAt || subtask.createdAt || 0));
+
+  return (
+    <div style={progressWrapStyle}>
+      <div style={progressHeaderStyle}>
+        <span>{progress.label}</span>
+        <span>{progress.doneCount}/{progress.total} 平台完成</span>
+      </div>
+      <div style={progressTrackStyle}>
+        <div style={{ ...progressBarStyle, width: `${progress.percent}%` }} />
+      </div>
+      <div style={progressMetaStyle}>
+        <span>{activePlatforms ? `正在处理：${activePlatforms}` : "正在汇总结果"}</span>
+        {updatedAt > 0 && <span>最近更新 {formatElapsed(updatedAt)}</span>}
+      </div>
     </div>
   );
 }
@@ -201,6 +236,33 @@ function priceSortValue(offer: ExternalOffer) {
   return Number.MAX_SAFE_INTEGER;
 }
 
+function getTaskProgress(task: ComparisonTask) {
+  const total = Math.max(task.subtasks.length, 1);
+  const doneCount = task.subtasks.filter((subtask) => subtask.status === "done").length;
+  const failedCount = task.subtasks.filter((subtask) =>
+    ["failed", "timeout", "login_required"].includes(subtask.status)
+  ).length;
+  const runningCount = task.subtasks.filter((subtask) => subtask.status === "in_progress").length;
+  const queuedCount = task.subtasks.filter((subtask) => subtask.status === "queued").length;
+  const weighted = doneCount + failedCount + runningCount * 0.55 + queuedCount * 0.2;
+  const percent = Math.max(8, Math.min(98, Math.round((weighted / total) * 100)));
+  const isTerminal = ["done", "failed", "cancelled"].includes(task.status)
+    || task.subtasks.every((subtask) => ["done", "failed", "timeout", "login_required"].includes(subtask.status));
+  let label = "正在比价";
+  if (runningCount > 0) label = "Chrome 扩展正在抓取搜索结果";
+  else if (queuedCount > 0) label = "等待 Chrome 扩展领取任务";
+  else if (failedCount > 0) label = "部分平台需要处理";
+  return { doneCount, failedCount, isTerminal, label, percent, total };
+}
+
+function formatElapsed(timestamp: number) {
+  const seconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
+  if (seconds < 5) return "刚刚";
+  if (seconds < 60) return `${seconds} 秒前`;
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes} 分钟前`;
+}
+
 function valueOrDash(value?: string | null) {
   return value && value.trim() ? value : "—";
 }
@@ -247,6 +309,48 @@ const retryButtonStyle: CSSProperties = {
   cursor: "pointer",
   padding: 0,
   textDecoration: "underline",
+};
+
+const progressWrapStyle: CSSProperties = {
+  background: "#f8fafc",
+  border: "1px solid var(--border)",
+  borderRadius: 8,
+  padding: "9px 10px",
+  marginBottom: 10,
+};
+
+const progressHeaderStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  gap: 12,
+  color: "var(--text-secondary)",
+  fontSize: 12,
+  fontWeight: 700,
+  marginBottom: 7,
+};
+
+const progressTrackStyle: CSSProperties = {
+  height: 6,
+  borderRadius: 999,
+  background: "#e5e7eb",
+  overflow: "hidden",
+};
+
+const progressBarStyle: CSSProperties = {
+  height: "100%",
+  borderRadius: 999,
+  background: "linear-gradient(90deg, #2563eb, #22c55e)",
+  transition: "width 240ms ease",
+};
+
+const progressMetaStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  gap: 12,
+  color: "var(--text-muted)",
+  fontSize: 11,
+  marginTop: 7,
+  flexWrap: "wrap",
 };
 
 const tableWrapStyle: CSSProperties = {

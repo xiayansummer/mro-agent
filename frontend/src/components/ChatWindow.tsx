@@ -75,7 +75,7 @@ export default function ChatWindow({ sessionId, messages, onMessagesChange, onTo
         return taskId && taskById.has(taskId) ? { ...message, comparisonTask: taskById.get(taskId) } : message;
       });
       updateMessages(next);
-    }, 5000);
+    }, 2500);
 
     return () => window.clearInterval(timer);
   }, [messages, updateMessages]);
