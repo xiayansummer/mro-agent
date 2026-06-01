@@ -42,6 +42,9 @@ export default function ComparisonTaskCard({ task, sessionId, onRefresh, onRetry
           <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 3 }}>
             默认按匹配度排序，价格仅作辅助参考。
           </div>
+          <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
+            及时标记候选是否合适，反馈越多，AI 后续越懂您的采购偏好。
+          </div>
         </div>
         <button onClick={onRefresh} style={buttonStyle}>刷新</button>
       </div>
@@ -159,6 +162,7 @@ function ComparisonTable({ offers, sessionId }: { offers: ExternalOffer[]; sessi
       <table style={tableStyle}>
         <thead>
           <tr>
+            <Th width={90}>反馈</Th>
             <Th width={74}>平台</Th>
             <Th>候选商品</Th>
             <Th width={92}>品牌/SKU</Th>
@@ -166,7 +170,6 @@ function ComparisonTable({ offers, sessionId }: { offers: ExternalOffer[]; sessi
             <Th width={96}>价格</Th>
             <Th width={92}>库存/货期</Th>
             <Th width={150}>匹配原因</Th>
-            <Th width={90}>反馈</Th>
           </tr>
         </thead>
         <tbody>
@@ -193,6 +196,9 @@ function OfferRow({ offer, sessionId }: { offer: ExternalOffer; sessionId?: stri
 
   return (
     <tr style={trStyle}>
+      <td style={tdStyle}>
+        <FeedbackButtons vote={vote} onVote={handleVote} />
+      </td>
       <td style={tdStyle}>
         <div style={platformStyle}>{PLATFORM_LABELS[offer.platform]}</div>
         <div style={scoreStyle}>匹配 {Math.round(offer.matchScore || 0)}</div>
@@ -229,9 +235,6 @@ function OfferRow({ offer, sessionId }: { offer: ExternalOffer; sessionId?: stri
         <div style={reasonStyle}>
           {offer.matchReasons.length > 0 ? offer.matchReasons.slice(0, 3).join("；") : "按搜索相关性保留"}
         </div>
-      </td>
-      <td style={tdStyle}>
-        <FeedbackButtons vote={vote} onVote={handleVote} />
       </td>
     </tr>
   );
