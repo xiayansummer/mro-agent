@@ -136,6 +136,7 @@ export default function MessageBubble({
           <div style={{ marginBottom: 12 }}>
             <ComparisonTaskCard
               task={message.comparisonTask as ComparisonTask}
+              sessionId={sessionId}
               onRefresh={() => onComparisonRefresh?.(message.id, message.comparisonTask!.id)}
               onRetryPlatform={(platform) => onComparisonRetry?.(message.id, message.comparisonTask!.id, platform)}
             />

@@ -1,6 +1,7 @@
 import {
   SkuItem,
   CompetitorItem,
+  ExternalOffer,
   SlotClarification,
   ComparisonDraft,
   ComparisonTask,
@@ -27,6 +28,31 @@ export async function submitFeedback(
         l2_category: sku.l2_category_name ?? "",
         l3_category: sku.l3_category_name ?? "",
         specification: sku.specification ?? "",
+      }),
+    });
+  } catch {
+    // fire-and-forget, silent fail
+  }
+}
+
+export async function submitExternalOfferFeedback(
+  sessionId: string,
+  action: "liked" | "disliked",
+  offer: ExternalOffer,
+): Promise<void> {
+  try {
+    await fetch(`${API_BASE}/feedback`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeader() },
+      body: JSON.stringify({
+        session_id: sessionId,
+        action,
+        item_code: offer.platformSku || offer.id,
+        item_name: offer.title,
+        brand_name: offer.brand ?? "",
+        l2_category: offer.platform,
+        l3_category: "外部平台候选",
+        specification: offer.specText ?? "",
       }),
     });
   } catch {

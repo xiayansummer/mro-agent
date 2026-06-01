@@ -1,8 +1,10 @@
-import type { CSSProperties } from "react";
+import { useState, type CSSProperties } from "react";
 import { ComparisonPlatform, ComparisonSubtask, ComparisonTask, ExternalOffer } from "../types";
+import { submitExternalOfferFeedback } from "../services/api";
 
 interface Props {
   task: ComparisonTask;
+  sessionId?: string;
   onRefresh?: () => void;
   onRetryPlatform?: (platform: ComparisonPlatform) => void;
 }
@@ -24,7 +26,7 @@ const STATUS_LABELS: Record<string, string> = {
   timeout: "超时",
 };
 
-export default function ComparisonTaskCard({ task, onRefresh, onRetryPlatform }: Props) {
+export default function ComparisonTaskCard({ task, sessionId, onRefresh, onRetryPlatform }: Props) {
   const offers = task.subtasks.flatMap((subtask) =>
     subtask.items.map((item) => ({ ...item, platform: subtask.platform }))
   ).sort(compareOffers);
@@ -68,7 +70,7 @@ export default function ComparisonTaskCard({ task, onRefresh, onRetryPlatform }:
       )}
 
       {offers.length > 0 ? (
-        <ComparisonTable offers={offers.slice(0, 10)} />
+        <ComparisonTable offers={offers.slice(0, 10)} sessionId={sessionId} />
       ) : (
         <div style={emptyStyle}>
           {task.status === "queued" || task.status === "running"
@@ -151,7 +153,7 @@ function isJdBlockedByVerification(subtask: ComparisonSubtask) {
   );
 }
 
-function ComparisonTable({ offers }: { offers: ExternalOffer[] }) {
+function ComparisonTable({ offers, sessionId }: { offers: ExternalOffer[]; sessionId?: string }) {
   return (
     <div style={tableWrapStyle}>
       <table style={tableStyle}>
@@ -164,11 +166,12 @@ function ComparisonTable({ offers }: { offers: ExternalOffer[] }) {
             <Th width={96}>价格</Th>
             <Th width={92}>库存/货期</Th>
             <Th width={150}>匹配原因</Th>
+            <Th width={90}>反馈</Th>
           </tr>
         </thead>
         <tbody>
           {offers.map((offer) => (
-            <OfferRow key={`${offer.platform}-${offer.id}`} offer={offer} />
+            <OfferRow key={`${offer.platform}-${offer.id}`} offer={offer} sessionId={sessionId} />
           ))}
         </tbody>
       </table>
@@ -180,7 +183,14 @@ function Th({ children, width }: { children: string; width?: number }) {
   return <th style={{ ...thStyle, width }}>{children}</th>;
 }
 
-function OfferRow({ offer }: { offer: ExternalOffer }) {
+function OfferRow({ offer, sessionId }: { offer: ExternalOffer; sessionId?: string }) {
+  const [vote, setVote] = useState<"liked" | "disliked" | null>(null);
+
+  const handleVote = (action: "liked" | "disliked") => {
+    setVote(action);
+    if (sessionId) submitExternalOfferFeedback(sessionId, action, offer);
+  };
+
   return (
     <tr style={trStyle}>
       <td style={tdStyle}>
@@ -220,7 +230,43 @@ function OfferRow({ offer }: { offer: ExternalOffer }) {
           {offer.matchReasons.length > 0 ? offer.matchReasons.slice(0, 3).join("；") : "按搜索相关性保留"}
         </div>
       </td>
+      <td style={tdStyle}>
+        <FeedbackButtons vote={vote} onVote={handleVote} />
+      </td>
     </tr>
+  );
+}
+
+function FeedbackButtons({
+  vote,
+  onVote,
+}: {
+  vote: "liked" | "disliked" | null;
+  onVote: (action: "liked" | "disliked") => void;
+}) {
+  return (
+    <div style={feedbackWrapStyle}>
+      <div style={feedbackTextStyle}>
+        {vote === "liked" ? "已标记合适" : vote === "disliked" ? "已标记不合适" : "是否合适？"}
+      </div>
+      <div style={{ display: "flex", gap: 4 }}>
+        {(["liked", "disliked"] as const).map((action) => {
+          const isActive = vote === action;
+          const isLike = action === "liked";
+          return (
+            <button
+              key={action}
+              disabled={vote !== null}
+              onClick={() => onVote(action)}
+              title={isLike ? "合适" : "不合适"}
+              style={feedbackButtonStyle(isActive, isLike)}
+            >
+              {isLike ? "✓" : "×"}
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
@@ -310,6 +356,33 @@ const retryButtonStyle: CSSProperties = {
   padding: 0,
   textDecoration: "underline",
 };
+
+const feedbackWrapStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 5,
+};
+
+const feedbackTextStyle: CSSProperties = {
+  fontSize: 11,
+  color: "var(--text-muted)",
+  whiteSpace: "nowrap",
+};
+
+function feedbackButtonStyle(active: boolean, isLike: boolean): CSSProperties {
+  return {
+    width: 24,
+    height: 24,
+    borderRadius: 6,
+    border: `1px solid ${active ? (isLike ? "#86efac" : "#fca5a5") : "var(--border)"}`,
+    background: active ? (isLike ? "#dcfce7" : "#fee2e2") : "var(--surface)",
+    color: active ? (isLike ? "#166534" : "#b91c1c") : "var(--text-secondary)",
+    cursor: active ? "default" : "pointer",
+    fontSize: 13,
+    fontWeight: 700,
+    lineHeight: 1,
+  };
+}
 
 const progressWrapStyle: CSSProperties = {
   background: "#f8fafc",
