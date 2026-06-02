@@ -310,3 +310,136 @@ def test_build_search_terms_omits_empty_brand():
 
     assert terms.jd[0] == "O型圈 30×3.1mm"
     assert all("None" not in term for term in terms.jd)
+
+
+# ── brand-only 品类候选改用 DB 真实品类 ──────────────────────────────────────
+
+
+def _brand_only_slot():
+    return {
+        "summary": "需要采购美和品牌的产品",
+        "known": [{"label": "品牌", "value": "美和"}],
+        "missing": [
+            {
+                "key": "category",
+                "icon": "📦",
+                "question": "请选择具体产品品类？",
+                "options": ["快速夹钳", "定位销", "夹具衬套", "其他紧固件"],
+            },
+            {
+                "key": "model",
+                "icon": "📏",
+                "question": "是否有具体型号或规格？",
+                "options": ["有具体型号", "按应用场景推荐", "查看热销产品"],
+            },
+        ],
+    }
+
+
+def test_apply_brand_categories_replaces_category_options():
+    parsed = {"brand": "美和", "l3_category": None, "l4_category": None}
+    slot = _brand_only_slot()
+    replaced = comparison_structure._apply_brand_categories_to_slot(
+        parsed, slot, ["手拉葫芦", "电动葫芦", "钢丝绳"]
+    )
+    assert replaced is True
+    assert slot["missing"][0]["options"] == ["手拉葫芦", "电动葫芦", "钢丝绳"]
+    # 型号维度不受影响
+    assert slot["missing"][1]["options"] == ["有具体型号", "按应用场景推荐", "查看热销产品"]
+
+
+def test_apply_brand_categories_caps_at_five():
+    parsed = {"brand": "美和"}
+    slot = _brand_only_slot()
+    comparison_structure._apply_brand_categories_to_slot(
+        parsed, slot, ["a", "b", "c", "d", "e", "f", "g"]
+    )
+    assert slot["missing"][0]["options"] == ["a", "b", "c", "d", "e"]
+
+
+def test_apply_brand_categories_skips_when_category_known():
+    parsed = {"brand": "美和", "l3_category": "葫芦绞车"}
+    slot = _brand_only_slot()
+    assert comparison_structure._apply_brand_categories_to_slot(parsed, slot, ["手拉葫芦"]) is False
+    assert slot["missing"][0]["options"] == ["快速夹钳", "定位销", "夹具衬套", "其他紧固件"]
+
+
+def test_apply_brand_categories_skips_without_brand():
+    parsed = {"brand": None}
+    slot = _brand_only_slot()
+    assert comparison_structure._apply_brand_categories_to_slot(parsed, slot, ["手拉葫芦"]) is False
+
+
+def test_apply_brand_categories_skips_empty_db_result():
+    parsed = {"brand": "美和"}
+    slot = _brand_only_slot()
+    assert comparison_structure._apply_brand_categories_to_slot(parsed, slot, []) is False
+    assert slot["missing"][0]["options"] == ["快速夹钳", "定位销", "夹具衬套", "其他紧固件"]
+
+
+def test_apply_brand_categories_no_category_dimension():
+    parsed = {"brand": "美和"}
+    slot = {"missing": [{"key": "size", "icon": "📏", "question": "规格？", "options": ["M8"]}]}
+    assert comparison_structure._apply_brand_categories_to_slot(parsed, slot, ["手拉葫芦"]) is False
+
+
+@pytest.mark.asyncio
+async def test_build_comparison_structure_brand_only_uses_db_categories(monkeypatch):
+    async def fake_parse_intent(*args, **kwargs):
+        return {
+            "l1_category": None, "l2_category": None, "l3_category": None, "l4_category": None,
+            "keywords": [], "spec_keywords": [], "brand": "美和", "query_type": "vague",
+            "need_clarification": True,
+            "slot_clarification": _brand_only_slot(),
+            "attribute_gaps": [],
+        }
+
+    async def fake_fetch(brand):
+        assert brand == "美和"
+        return ["手拉葫芦", "电动葫芦", "钢丝绳"]
+
+    monkeypatch.setattr(comparison_structure, "parse_intent", fake_parse_intent)
+    monkeypatch.setattr(comparison_structure, "_fetch_brand_categories", fake_fetch)
+
+    result = await comparison_structure.build_comparison_structure("美和")
+
+    assert result.shouldCreateDraft is False
+    assert result.slotClarification is not None
+    options = result.slotClarification["missing"][0]["options"]
+    assert options == ["手拉葫芦", "电动葫芦", "钢丝绳"]
+
+
+@pytest.mark.asyncio
+async def test_query_brand_categories_two_step_sql():
+    from unittest.mock import AsyncMock, MagicMock
+
+    session = AsyncMock()
+    sid_res = MagicMock()
+    sid_res.fetchall.return_value = [(3286,), (31204,)]
+    cat_res = MagicMock()
+    cat_res.fetchall.return_value = [("组合吊索具", 563), ("葫芦绞车", 91)]
+    session.execute.side_effect = [sid_res, cat_res]
+
+    cats = await comparison_structure._query_brand_categories(session, "美和")
+
+    assert cats == ["组合吊索具", "葫芦绞车"]
+    assert session.execute.call_count == 2
+    sql1 = str(session.execute.call_args_list[0][0][0]).lower()
+    sql2 = str(session.execute.call_args_list[1][0][0]).lower()
+    assert "t_brand" in sql1
+    assert "t_item_info" in sql2 and "t_category" in sql2
+
+
+@pytest.mark.asyncio
+async def test_query_brand_categories_no_brand_match():
+    from unittest.mock import AsyncMock, MagicMock
+
+    session = AsyncMock()
+    sid_res = MagicMock()
+    sid_res.fetchall.return_value = []
+    session.execute.side_effect = [sid_res]
+
+    cats = await comparison_structure._query_brand_categories(session, "查无此牌")
+
+    assert cats == []
+    assert session.execute.call_count == 1  # 品牌都查不到就不再查品类

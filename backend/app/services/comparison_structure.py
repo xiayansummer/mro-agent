@@ -2,6 +2,7 @@ import re
 from typing import Optional
 
 from pydantic import BaseModel, Field
+from sqlalchemy import text
 
 from app.models.comparison import (
     ComparisonCategory,
@@ -43,6 +44,7 @@ async def build_comparison_structure(
     structure = _structure_from_intent(user_message, parsed)
     parsed_slot = _parsed_slot_clarification(parsed)
     if parsed_slot:
+        await _enrich_brand_only_category_options(parsed, parsed_slot)
         return ComparisonStructureResult(
             shouldCreateDraft=False,
             slotClarification=parsed_slot,
@@ -126,6 +128,100 @@ def _parsed_slot_clarification(parsed: dict) -> Optional[dict]:
     if not isinstance(missing, list) or not missing:
         return None
     return payload
+
+
+def _is_category_dimension(item: dict) -> bool:
+    return item.get("icon") == "📦" or "品类" in str(item.get("question") or "")
+
+
+def _apply_brand_categories_to_slot(parsed: dict, slot: dict, categories: list[str]) -> bool:
+    """brand-only 时,用 DB 查到的该品牌真实品类替换 slot 里品类维度的候选。
+
+    纯函数,返回是否发生替换。
+    - 仅当有 brand 且尚无明确品类(brand-only)时生效
+    - 仅替换"品类"维度(icon 📦 或问句含"品类"),其它维度(型号/规格等)不动
+    - categories 为空则不替换(DB 没有该品牌数据时保留原候选兜底)
+    """
+    if not parsed.get("brand"):
+        return False
+    if parsed.get("l3_category") or parsed.get("l4_category"):
+        return False
+    if not categories:
+        return False
+    missing = slot.get("missing")
+    if not isinstance(missing, list):
+        return False
+    for item in missing:
+        if _is_category_dimension(item):
+            item["options"] = categories[:5]
+            return True
+    return False
+
+
+async def _query_brand_categories(session, brand: str) -> list[str]:
+    """在 ERP 库查该品牌的真实经营 L3 品类(按 SKU 数降序)。
+
+    t_brand(品牌维度,主键 sid,brandName)→ t_item_info(商品,brandId/category3Id)
+    → t_category(品类维度,主键 sid,categoryName)。品牌名 + 字典别名都用来 LIKE
+    匹配 t_brand.brandName,兼顾"美和""美和 TOHO""MyMRO | 美和"等多条品牌记录。
+    """
+    from app.services.normalization import _seed_terms_for
+
+    terms = _seed_terms_for(brand) or [brand]
+    like_clauses = " OR ".join(f"brandName LIKE :t{i}" for i in range(len(terms)))
+    like_params = {f"t{i}": f"%{term}%" for i, term in enumerate(terms)}
+    brand_rows = await session.execute(
+        text(f"SELECT sid FROM t_brand WHERE {like_clauses}"),
+        like_params,
+    )
+    sids = [row[0] for row in brand_rows.fetchall()]
+    if not sids:
+        return []
+
+    placeholders = ",".join(f":b{i}" for i in range(len(sids)))
+    cat_params = {f"b{i}": sid for i, sid in enumerate(sids)}
+    cat_rows = await session.execute(
+        text(
+            f"""
+            SELECT c.categoryName, COUNT(*) AS cnt
+            FROM t_item_info i
+            JOIN t_category c ON c.sid = i.category3Id
+            WHERE i.brandId IN ({placeholders})
+            GROUP BY c.categoryName
+            ORDER BY cnt DESC
+            LIMIT 6
+            """
+        ),
+        cat_params,
+    )
+    return [row[0] for row in cat_rows.fetchall() if row[0]]
+
+
+async def _fetch_brand_categories(brand: str) -> list[str]:
+    """查该品牌的真实经营 L3 品类。失败/无数据返回空(不阻断主流程)。"""
+    brand = (brand or "").strip()
+    if not brand:
+        return []
+    from app.db.mysql import AsyncSessionLocal
+
+    try:
+        async with AsyncSessionLocal() as session:
+            return await _query_brand_categories(session, brand)
+    except Exception:
+        return []
+
+
+async def _enrich_brand_only_category_options(parsed: dict, slot: dict) -> None:
+    """brand-only 且 slot 含品类维度时,用 DB 真实品类替换 LLM 凭空生成的品类候选。
+    通用于所有品牌:用户只给品牌名时,品类候选来自该品牌在库里的真实经营品类。"""
+    brand = parsed.get("brand")
+    if not brand or parsed.get("l3_category") or parsed.get("l4_category"):
+        return
+    missing = slot.get("missing") or []
+    if not any(_is_category_dimension(item) for item in missing):
+        return
+    categories = await _fetch_brand_categories(brand)
+    _apply_brand_categories_to_slot(parsed, slot, categories)
 
 
 def _comparison_slot_clarification(parsed: dict, structure: ComparisonStructure) -> Optional[dict]:
