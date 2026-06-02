@@ -49,11 +49,9 @@ export default function Sidebar({
     e.target.value = "";
 
     setImportStatus("正在导入...");
-    const sessionId = localStorage.getItem("mro_session_id") || "unknown";
 
     const form = new FormData();
     form.append("file", file);
-    form.append("session_id", sessionId);
 
     try {
       const res = await fetch("/api/profile/import", { method: "POST", body: form, headers: authHeader() });

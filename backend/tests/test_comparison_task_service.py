@@ -38,6 +38,16 @@ class FakeSession:
             draft = self.__class__.drafts.get((params["draft_id"], params["uid"]))
             return FakeResult(draft)
 
+        if "SELECT id FROM comparison_tasks" in sql:
+            matches = [
+                t for t in self.__class__.tasks.values()
+                if t["draft_id"] == params["draft_id"] and t["user_id"] == params["uid"]
+            ]
+            if matches:
+                latest = max(matches, key=lambda t: t["created_at"])
+                return FakeResult((latest["id"],))
+            return FakeResult()
+
         if "INSERT INTO comparison_tasks" in sql:
             now = datetime(2026, 1, 1)
             self.__class__.tasks[params["id"]] = {
@@ -294,6 +304,30 @@ async def test_start_draft_blocks_all_subtasks_when_extension_offline(monkeypatc
     assert task["status"] == "partial"
     assert FakeSession.last_draft_status == "needs_login"
     assert all(item["status"] == "login_required" for item in task["subtasks"])
+
+
+@pytest.mark.asyncio
+async def test_start_draft_reuses_existing_task_no_duplicate(monkeypatch):
+    """同一草稿重复 start(双击 / 重试)应复用已有 task,不建第二套子任务。"""
+    async def fake_status(user_id):
+        return ExtensionStatus(online=True, platforms=[PlatformStatus(platform="jd", loggedIn=True)])
+
+    monkeypatch.setattr(comparison_task_service.extension_service, "get_extension_status", fake_status)
+    FakeSession.tasks["task-existing"] = {
+        "id": "task-existing", "draft_id": "draft-1", "user_id": 7,
+        "status": "queued", "created_at": datetime(2026, 1, 1), "completed_at": None,
+    }
+    FakeSession.subtasks["sub-existing"] = {
+        "id": "sub-existing", "task_id": "task-existing", "platform": "jd",
+        "status": "queued", "search_terms_json": json.dumps(["t"]), "items_json": None,
+        "error_json": None, "leased_until": None,
+        "created_at": datetime(2026, 1, 1), "updated_at": datetime(2026, 1, 1),
+    }
+
+    task = await comparison_task_service.start_draft("draft-1", "u7")
+
+    assert task["id"] == "task-existing"  # 复用,未建新 task
+    assert len([t for t in FakeSession.tasks.values() if t["draft_id"] == "draft-1"]) == 1
 
 
 @pytest.mark.asyncio

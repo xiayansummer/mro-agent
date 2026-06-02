@@ -21,7 +21,6 @@ SUBTASK_LEASE_SECONDS = 90
 
 async def start_draft(draft_id: str, user_id: str) -> Optional[dict]:
     db_user_id = _require_db_user_id(user_id)
-    task_id = _new_id("cmp_task")
 
     async with AsyncSessionLocal() as session:
         draft_result = await session.execute(
@@ -38,6 +37,24 @@ async def start_draft(draft_id: str, user_id: str) -> Optional[dict]:
         if not draft:
             return None
 
+        # 防重复:同一草稿已建过 task 则复用最新,避免双击 / 重试建出多套子任务,
+        # 进而让京东工业品 / 震坤行被重复抓取(浪费配额、触发风控)。
+        existing = await session.execute(
+            text(
+                """
+                SELECT id FROM comparison_tasks
+                WHERE draft_id = :draft_id AND user_id = :uid
+                ORDER BY created_at DESC
+                LIMIT 1
+                """
+            ),
+            {"draft_id": draft_id, "uid": db_user_id},
+        )
+        existing_row = existing.fetchone()
+        if existing_row:
+            return await get_task(existing_row[0], user_id)
+
+        task_id = _new_id("cmp_task")
         selected_platforms = _loads(draft[1]) or ["jd", "zkh"]
         search_terms = _loads(draft[2]) or {}
         extension_status = await extension_service.get_extension_status(user_id)

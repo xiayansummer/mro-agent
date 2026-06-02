@@ -73,52 +73,52 @@ async function pollAndRunNextTask() {
   if (!settings.extToken) return { skipped: true, reason: "not_bound" };
 
   taskRunning = true;
+  let processed = 0;
+  const MAX_PER_POLL = 20; // 防失控上限:一次轮询最多连续处理 20 个子任务
   try {
-    const task = await fetchNextTask(settings.apiBase, settings.extToken);
-    if (!task) return { skipped: true, reason: "no_task" };
+    // 连续 drain 队列直到没有待办。一个比价任务含 jd + zkh 两个子任务,若每次只
+    // 抓一个,剩下的要等下一个心跳周期(分钟级延迟),这里一次性抓完。
+    while (processed < MAX_PER_POLL) {
+      const task = await fetchNextTask(settings.apiBase, settings.extToken);
+      if (!task) break;
+      processed += 1;
 
-    const runner = getTaskRunner(task.platform);
-    if (!runner) {
-      await updateSubtaskStatus(
+      const runner = getTaskRunner(task.platform);
+      if (!runner) {
+        await updateSubtaskStatus(
+          settings.apiBase,
+          settings.extToken,
+          task.subtaskId,
+          "failed",
+          `平台适配器未实现：${task.platform}`,
+        );
+        continue;
+      }
+
+      const result = await runner(task);
+      // 由纯函数 decideSubtaskOutcome 决定落库状态:done / login_required / failed。
+      const outcome = decideSubtaskOutcome(result);
+      if (outcome.status !== "done") {
+        await updateSubtaskStatus(
+          settings.apiBase,
+          settings.extToken,
+          task.subtaskId,
+          outcome.status,
+          outcome.message,
+        );
+        continue; // 继续 drain,不中断后续子任务
+      }
+
+      await submitSubtaskResults(
         settings.apiBase,
         settings.extToken,
         task.subtaskId,
-        "failed",
-        `平台适配器未实现：${task.platform}`,
+        task.platform,
+        result.searchTerm,
+        result.offers,
       );
-      return { skipped: false, subtaskId: task.subtaskId, status: "failed" };
     }
-
-    const result = await runner(task);
-    // 由纯函数 decideSubtaskOutcome 决定落库状态:done / login_required / failed。
-    // login_required 是本次新增路径 —— 让"未登录拿到默认页"明确走登录引导,
-    // 而不是把垃圾当 done 展示、或笼统标 failed。
-    const outcome = decideSubtaskOutcome(result);
-    if (outcome.status !== "done") {
-      await updateSubtaskStatus(
-        settings.apiBase,
-        settings.extToken,
-        task.subtaskId,
-        outcome.status,
-        outcome.message,
-      );
-      return { skipped: false, subtaskId: task.subtaskId, status: outcome.status };
-    }
-
-    await submitSubtaskResults(
-      settings.apiBase,
-      settings.extToken,
-      task.subtaskId,
-      task.platform,
-      result.searchTerm,
-      result.offers,
-    );
-    return {
-      skipped: false,
-      subtaskId: task.subtaskId,
-      status: "done",
-      offers: result.offers.length,
-    };
+    return { skipped: false, processed };
   } finally {
     taskRunning = false;
   }

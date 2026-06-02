@@ -1,3 +1,4 @@
+import asyncio
 import json
 from openai import OpenAI
 from app.config import settings
@@ -564,11 +565,15 @@ async def parse_intent(
             "请参考以上历史记录，更准确地理解用户当前需求（如偏好品牌、常用规格、行业背景等）。"
         )
 
-    response = client.chat.completions.create(
-        model=model,
-        max_tokens=1024,
-        messages=[{"role": "system", "content": system_prompt}] + messages,
-        extra_body={"enable_thinking": False},
+    # 同步 OpenAI client 放到线程池,避免阻塞事件循环(单 worker uvicorn 下
+    # 否则一次 LLM 往返会冻结所有并发请求:他人 SSE、扩展轮询全被串行化)。
+    response = await asyncio.to_thread(
+        lambda: client.chat.completions.create(
+            model=model,
+            max_tokens=1024,
+            messages=[{"role": "system", "content": system_prompt}] + messages,
+            extra_body={"enable_thinking": False},
+        )
     )
 
     text = response.choices[0].message.content.strip()
