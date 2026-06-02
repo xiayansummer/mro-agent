@@ -154,3 +154,39 @@ async def test_discover_empty_brand_returns_empty():
     assert await discover_brand_variants(session, "") == []
     assert await discover_brand_variants(session, None) == []
     session.execute.assert_not_called()
+
+
+# ── text_matches_brand ──────────────────────────────────────────────────────
+from app.services.normalization import text_matches_brand
+
+
+def test_text_matches_brand_canonical_in_text():
+    assert text_matches_brand("美和TOHO 手拉葫芦1吨6米", "美和") is True
+
+
+def test_text_matches_brand_via_english_alias():
+    # 标题只写英文别名 TOHO,品牌规范名是"美和" → 命中
+    assert text_matches_brand("TOHO chain hoist 1T 3M", "美和") is True
+
+
+def test_text_matches_brand_rejects_unrelated_zaba():
+    # 杂牌手拉葫芦,不含 美和/TOHO/东星 → 不命中
+    assert text_matches_brand("沪工手拉葫芦1吨2吨3吨环链起重", "美和") is False
+    assert text_matches_brand("一马当先倒链手拉葫芦小型铁葫芦", "美和") is False
+
+
+def test_text_matches_brand_norbar_alias():
+    assert text_matches_brand("诺霸扭力扳手 15004", "诺霸") is True
+    assert text_matches_brand("NORBAR torque wrench", "诺霸") is True
+
+
+def test_text_matches_brand_empty_inputs():
+    assert text_matches_brand("任意文本美和", "") is False
+    assert text_matches_brand("", "美和") is False
+    assert text_matches_brand("文本", None) is False
+
+
+def test_text_matches_brand_unknown_brand_uses_self():
+    # 不在字典里的品牌,用自身名匹配
+    assert text_matches_brand("晋亿螺栓 M8", "晋亿") is True
+    assert text_matches_brand("固万基螺栓", "晋亿") is False

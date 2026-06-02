@@ -2,6 +2,7 @@ import re
 from typing import Any
 
 from app.models.comparison import ComparisonStructure
+from app.services.normalization import text_matches_brand
 
 
 def rank_external_offers(structure: ComparisonStructure | dict | None, offers: list[dict]) -> list[dict]:
@@ -10,7 +11,7 @@ def rank_external_offers(structure: ComparisonStructure | dict | None, offers: l
 
     normalized_structure = _structure_dict(structure)
     scored = [_score_offer(normalized_structure, offer, index) for index, offer in enumerate(offers)]
-    return sorted(
+    ranked = sorted(
         scored,
         key=lambda offer: (
             -float(offer.get("matchScore") or 0),
@@ -18,6 +19,16 @@ def rank_external_offers(structure: ComparisonStructure | dict | None, offers: l
             int(offer.get("rawRank") or 9999),
         ),
     )
+
+    # 用户指定了品牌时:只保留命中该品牌(含字典别名)的 offer,剔除杂牌。
+    # 通用于所有品牌。若一个都没命中(平台未收录该品牌),兜底保留全部,
+    # 避免给用户空列表。
+    brand = _clean(normalized_structure.get("specification", {}).get("brand"))
+    if brand:
+        on_brand = [offer for offer in ranked if text_matches_brand(_offer_text(offer), brand)]
+        if on_brand:
+            return on_brand
+    return ranked
 
 
 def _score_offer(structure: dict, offer: dict, index: int) -> dict:
@@ -31,7 +42,7 @@ def _score_offer(structure: dict, offer: dict, index: int) -> dict:
         reasons.append(f"产品类型匹配：{product_type}")
 
     brand = _clean(structure.get("specification", {}).get("brand"))
-    if brand and brand.lower() in haystack:
+    if brand and text_matches_brand(haystack, brand):
         score += 18
         reasons.append(f"品牌匹配：{brand}")
 

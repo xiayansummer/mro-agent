@@ -97,6 +97,26 @@ def _canonical_of(brand: str) -> str:
     return _build_alias_to_canonical().get(brand.lower(), brand)
 
 
+def text_matches_brand(text: Optional[str], brand: Optional[str]) -> bool:
+    """文本是否命中该品牌(含字典别名)。
+
+    用签名(去空格/标点、统一大小写)做子串匹配,逐个比对品牌的规范名
+    与字典别名;品牌词需 ≥2 字符以排除 1 字符误命中。接受规范名或别名
+    作为 brand 输入。用在已按品类搜索过的比价结果上,故短英文品牌名的
+    子串误命中风险可控。
+    """
+    if not brand or not text:
+        return False
+    text_sig = _signature(text)
+    if not text_sig:
+        return False
+    for term in _seed_terms_for(brand):
+        term_sig = _signature(term)
+        if len(term_sig) >= 2 and term_sig in text_sig:
+            return True
+    return False
+
+
 async def _get_all_db_brands(session) -> list[str]:
     """Fetch DISTINCT brand_name from t_item_sample, cached per process for BRAND_CACHE_TTL."""
     global _ALL_BRANDS_CACHE
