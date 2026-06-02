@@ -122,7 +122,7 @@ function PlatformStatusChip({
   subtask: ComparisonSubtask;
   onRetryPlatform?: (platform: ComparisonPlatform) => void;
 }) {
-  const retryable = ["login_required", "failed", "timeout"].includes(subtask.status);
+  const retryable = isRetryableSubtask(subtask);
   return (
     <span style={statusChipStyle(subtask.status)}>
       {PLATFORM_LABELS[subtask.platform]} · {STATUS_LABELS[subtask.status] || subtask.status}
@@ -141,10 +141,26 @@ function PlatformStatusChip({
 
 function formatSubtaskError(subtask: ComparisonSubtask) {
   const message = subtask.error?.message || subtask.error?.code || "执行失败";
+  if (isHeartbeatLoginRequired(subtask)) {
+    return `${PLATFORM_LABELS[subtask.platform]}：平台未登录或登录态未知。请先在 Chrome 扩展里完成平台登录并点击“立即上报状态”，然后刷新本卡片。`;
+  }
   if (isJdBlockedByVerification(subtask)) {
     return "京东工业品：当前触发登录/安全验证。扩展会保留京东验证页，请先在插件里打开并完成验证，然后回到本卡片点击重试。";
   }
   return `${PLATFORM_LABELS[subtask.platform]}：${message}`;
+}
+
+function isRetryableSubtask(subtask: ComparisonSubtask) {
+  if (isHeartbeatLoginRequired(subtask)) return false;
+  return ["login_required", "failed", "timeout"].includes(subtask.status);
+}
+
+function isHeartbeatLoginRequired(subtask: ComparisonSubtask) {
+  const message = `${subtask.error?.message || ""} ${subtask.error?.code || ""}`;
+  return (
+    subtask.status === "login_required"
+    && /login_required|平台未登录|登录态未知|extension_offline|Chrome 扩展未在线/i.test(message)
+  );
 }
 
 function isJdBlockedByVerification(subtask: ComparisonSubtask) {
