@@ -56,6 +56,24 @@ def _slot_clarification_event(parsed: dict, force_search: bool) -> str | None:
     return "event: slot_clarification\ndata: " + json.dumps(payload, ensure_ascii=False) + "\n\n"
 
 
+def _slot_context_summary(slot: dict) -> str:
+    summary = slot.get("summary") or ""
+    known = slot.get("known") or []
+    missing = slot.get("missing") or []
+    known_text = "；".join(
+        f"{item.get('label')}:{item.get('value')}"
+        for item in known
+        if isinstance(item, dict) and item.get("label") and item.get("value")
+    )
+    questions = "；".join(
+        item.get("question", "")
+        for item in missing
+        if isinstance(item, dict) and item.get("question")
+    )
+    parts = [part for part in [summary, f"已知参数：{known_text}" if known_text else "", questions] if part]
+    return "待确认参数：" + "；".join(parts) if parts else "待确认参数"
+
+
 # In-memory session store for hot multi-turn conversations.
 # DB chat history is the source of truth for cold starts / multi-replica traffic.
 _sessions: dict[str, dict] = {}
@@ -131,7 +149,7 @@ async def handle_message(
         text = "请先通过上方卡片确认关键参数，确认后我再查询京东工业品和震坤行。"
         yield f"event: text\ndata: {json.dumps(text, ensure_ascii=False)}\n\n"
         ctx["conversation"].append({"role": "user", "content": user_message})
-        ctx["conversation"].append({"role": "assistant", "content": text})
+        ctx["conversation"].append({"role": "assistant", "content": _slot_context_summary(slot_clarification)})
         yield "event: done\ndata: \n\n"
         return
 

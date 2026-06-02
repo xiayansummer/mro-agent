@@ -131,3 +131,47 @@ async def test_handle_message_guides_when_no_draft(monkeypatch):
 
     assert "请提供要采购的产品名称" in stream
     assert "event: comparison_draft" not in stream
+
+
+@pytest.mark.asyncio
+async def test_handle_message_keeps_slot_summary_in_hot_context(monkeypatch):
+    async def fake_user_context(user_id, limit):
+        return ""
+
+    calls = []
+
+    async def fake_create_draft_from_message(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            return {
+                "shouldCreateDraft": False,
+                "parsedIntent": {"query_type": "vague", "brand": "美和"},
+                "slotClarification": {
+                    "summary": "需要采购美和品牌的手拉葫芦",
+                    "known": [{"label": "品牌", "value": "美和"}],
+                    "missing": [
+                        {"key": "lift_height", "icon": "📏", "question": "需要多大起升高度？", "options": ["3米"]},
+                        {"key": "chain", "icon": "⚙️", "question": "需要什么链条结构？", "options": ["单行链"]},
+                    ],
+                },
+            }
+        return {
+            "shouldCreateDraft": False,
+            "guidance": "ok",
+            "parsedIntent": {"query_type": "broad_spec"},
+        }
+
+    monkeypatch.setattr(agent.memory_service, "get_user_context", fake_user_context)
+    monkeypatch.setattr(
+        agent.comparison_draft_service,
+        "create_draft_from_message",
+        fake_create_draft_from_message,
+    )
+
+    _ = [chunk async for chunk in agent.handle_message("s1", "美和", "u1")]
+    _ = [chunk async for chunk in agent.handle_message("s1", "3米 单行链", "u1")]
+
+    context = calls[1]["conversation_context"]
+    assistant_context = [item["content"] for item in context if item["role"] == "assistant"]
+    assert any("美和品牌的手拉葫芦" in item for item in assistant_context)
+    assert any("需要多大起升高度" in item for item in assistant_context)

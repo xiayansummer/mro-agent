@@ -44,7 +44,10 @@ export default function SlotClarificationCard({ slot, disabled = false, onSubmit
   const handleSubmit = () => {
     if (isLocked) return;
     const tagTexts = Object.values(selected).map(cleanChipText);
-    const composed = [...tagTexts, freeText.trim()].filter(Boolean).join(" ");
+    const knownTexts = slot.known.map((item) => `${item.label}${item.value}`).filter(Boolean);
+    const answerText = [...tagTexts, freeText.trim()].filter(Boolean).join(" ");
+    const contextText = [slot.summary, ...knownTexts].filter(Boolean).join(" ");
+    const composed = [contextText, answerText].filter(Boolean).join(" ");
     if (!composed) return;
     onSubmit(composed);
   };
