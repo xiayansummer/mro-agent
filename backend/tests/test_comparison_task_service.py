@@ -108,6 +108,18 @@ class FakeSession:
                     ))
             return FakeResult()
 
+        if "SELECT st.id, st.platform, st.error_json" in sql:
+            rows = []
+            for subtask in self.__class__.subtasks.values():
+                task = self.__class__.tasks[subtask["task_id"]]
+                if (
+                    subtask["task_id"] == params["task_id"]
+                    and task["user_id"] == params["uid"]
+                    and subtask["status"] == params["login_required"]
+                ):
+                    rows.append((subtask["id"], subtask["platform"], subtask["error_json"]))
+            return FakeResult(rows=rows)
+
         if "SELECT d.structure_json" in sql:
             subtask = self.__class__.subtasks.get(params["subtask_id"])
             if not subtask:
@@ -160,6 +172,15 @@ class FakeSession:
             return FakeResult(rows=list(counts.items()))
 
         if "UPDATE comparison_subtasks" in sql:
+            if "subtask_id" in params:
+                subtask = self.__class__.subtasks.get(params["subtask_id"])
+                if not subtask:
+                    return FakeResult(rowcount=0)
+                subtask["status"] = params["queued"]
+                subtask["items_json"] = None
+                subtask["error_json"] = None
+                subtask["leased_until"] = None
+                return FakeResult(rowcount=1)
             subtask = self.__class__.subtasks.get(params["id"])
             if not subtask:
                 return FakeResult(rowcount=0)
@@ -321,6 +342,79 @@ async def test_lease_next_subtask_marks_subtask_in_progress(monkeypatch):
     assert leased["requiredBrand"] == ""
     assert FakeSession.subtasks["subtask-1"]["status"] == "in_progress"
     assert FakeSession.tasks["task-1"]["status"] == "running"
+
+
+@pytest.mark.asyncio
+async def test_get_task_requeues_heartbeat_login_required_after_status_report(monkeypatch):
+    FakeSession.tasks["task-1"] = {
+        "id": "task-1",
+        "draft_id": "draft-1",
+        "user_id": 7,
+        "status": "partial",
+        "created_at": datetime(2026, 1, 1),
+        "completed_at": None,
+    }
+    FakeSession.subtasks["subtask-1"] = {
+        "id": "subtask-1",
+        "task_id": "task-1",
+        "platform": "jd",
+        "status": "login_required",
+        "search_terms_json": json.dumps(["jd term"]),
+        "items_json": None,
+        "error_json": json.dumps({"code": "login_required", "message": "平台未登录或登录态未知"}),
+        "leased_until": None,
+        "created_at": datetime(2026, 1, 1),
+        "updated_at": datetime(2026, 1, 1),
+    }
+
+    async def fake_status(user_id):
+        return ExtensionStatus(
+            online=True,
+            platforms=[PlatformStatus(platform="jd", loggedIn=True)],
+        )
+
+    monkeypatch.setattr(comparison_task_service.extension_service, "get_extension_status", fake_status)
+
+    task = await comparison_task_service.get_task("task-1", "u7")
+
+    assert task["status"] == "queued"
+    assert task["subtasks"][0]["status"] == "queued"
+    assert task["subtasks"][0]["error"] is None
+    assert FakeSession.tasks["task-1"]["status"] == "queued"
+
+
+@pytest.mark.asyncio
+async def test_get_task_does_not_requeue_verification_failure(monkeypatch):
+    FakeSession.tasks["task-1"] = {
+        "id": "task-1",
+        "draft_id": "draft-1",
+        "user_id": 7,
+        "status": "partial",
+        "created_at": datetime(2026, 1, 1),
+        "completed_at": None,
+    }
+    FakeSession.subtasks["subtask-1"] = {
+        "id": "subtask-1",
+        "task_id": "task-1",
+        "platform": "jd",
+        "status": "login_required",
+        "search_terms_json": json.dumps(["jd term"]),
+        "items_json": None,
+        "error_json": json.dumps({"message": "京东触发安全验证"}),
+        "leased_until": None,
+        "created_at": datetime(2026, 1, 1),
+        "updated_at": datetime(2026, 1, 1),
+    }
+
+    async def fail_if_called(user_id):
+        raise AssertionError("extension status should not be checked")
+
+    monkeypatch.setattr(comparison_task_service.extension_service, "get_extension_status", fail_if_called)
+
+    task = await comparison_task_service.get_task("task-1", "u7")
+
+    assert task["status"] == "partial"
+    assert task["subtasks"][0]["status"] == "login_required"
 
 
 def test_required_brand_from_structure_reads_spec_brand():

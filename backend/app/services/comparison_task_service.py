@@ -120,6 +120,16 @@ async def get_task(task_id: str, user_id: str) -> Optional[dict]:
         if not task:
             return None
 
+        if await _requeue_resolved_login_required_subtasks(session, task_id, db_user_id, user_id):
+            await session.commit()
+            task = (
+                task[0],
+                task[1],
+                ComparisonTaskStatus.QUEUED.value,
+                task[3],
+                None,
+            )
+
         subtasks_result = await session.execute(
             text(
                 """
@@ -208,6 +218,100 @@ async def retry_subtask(task_id: str, platform: str, user_id: str) -> Optional[d
         )
         await session.commit()
     return await get_task(task_id, user_id)
+
+
+async def _requeue_resolved_login_required_subtasks(
+    session,
+    task_id: str,
+    db_user_id: int,
+    user_id: str,
+) -> int:
+    result = await session.execute(
+        text(
+            """
+            SELECT st.id, st.platform, st.error_json
+            FROM comparison_subtasks st
+            JOIN comparison_tasks t ON t.id = st.task_id
+            WHERE st.task_id = :task_id
+              AND t.user_id = :uid
+              AND st.status = :login_required
+            """
+        ),
+        {
+            "task_id": task_id,
+            "uid": db_user_id,
+            "login_required": ComparisonSubtaskStatus.LOGIN_REQUIRED.value,
+        },
+    )
+    blocked_subtasks = [
+        (subtask_id, platform, error_json)
+        for subtask_id, platform, error_json in result.fetchall()
+        if _is_heartbeat_login_error(error_json)
+    ]
+    if not blocked_subtasks:
+        return 0
+
+    extension_status = await extension_service.get_extension_status(user_id)
+    if not extension_status.online:
+        return 0
+
+    logged_in_platforms = {
+        item.platform
+        for item in extension_status.platforms
+        if item.loggedIn is True
+    }
+    if not logged_in_platforms:
+        return 0
+
+    changed = 0
+    for subtask_id, platform, _error_json in blocked_subtasks:
+        if platform not in logged_in_platforms:
+            continue
+        update_result = await session.execute(
+            text(
+                """
+                UPDATE comparison_subtasks
+                SET status = :queued,
+                    items_json = NULL,
+                    error_json = NULL,
+                    leased_until = NULL
+                WHERE id = :subtask_id
+                """
+            ),
+            {
+                "queued": ComparisonSubtaskStatus.QUEUED.value,
+                "subtask_id": subtask_id,
+            },
+        )
+        changed += max(update_result.rowcount, 0)
+
+    if changed:
+        await session.execute(
+            text(
+                """
+                UPDATE comparison_tasks
+                SET status = :status, completed_at = NULL
+                WHERE id = :task_id AND user_id = :uid
+                """
+            ),
+            {"status": ComparisonTaskStatus.QUEUED.value, "task_id": task_id, "uid": db_user_id},
+        )
+    return changed
+
+
+def _is_heartbeat_login_error(raw_error: str | None) -> bool:
+    error = _loads(raw_error) if raw_error else {}
+    message = f"{error.get('code', '')} {error.get('message', '')}" if isinstance(error, dict) else str(raw_error or "")
+    return any(
+        marker in message
+        for marker in (
+            "login_required",
+            "extension_offline",
+            "平台未登录",
+            "登录态未知",
+            "Chrome 扩展未在线",
+        )
+    )
 
 
 async def lease_next_subtask(ext_token: str) -> Optional[dict]:
