@@ -118,13 +118,13 @@ def text_matches_brand(text: Optional[str], brand: Optional[str]) -> bool:
 
 
 async def _get_all_db_brands(session) -> list[str]:
-    """Fetch DISTINCT brand_name from t_item_sample, cached per process for BRAND_CACHE_TTL."""
+    """Fetch DISTINCT brandName from t_brand, cached per process for BRAND_CACHE_TTL."""
     global _ALL_BRANDS_CACHE
     now = time.time()
     if _ALL_BRANDS_CACHE and _ALL_BRANDS_CACHE[0] > now:
         return _ALL_BRANDS_CACHE[1]
     result = await session.execute(_sql_text(
-        "SELECT DISTINCT brand_name FROM t_item_sample WHERE brand_name IS NOT NULL"
+        "SELECT DISTINCT brandName FROM t_brand WHERE brandName IS NOT NULL"
     ))
     brands = [row[0] for row in result.fetchall() if row[0]]
     _ALL_BRANDS_CACHE = (now + BRAND_CACHE_TTL, brands)

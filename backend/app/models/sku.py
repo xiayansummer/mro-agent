@@ -7,7 +7,10 @@ class Base(DeclarativeBase):
 
 
 class ItemSample(Base):
-    __tablename__ = "t_item_sample"
+    # 原 t_item_sample 在生产不存在;指向聚合视图 v_item_info(UNION 10 个商品
+    # 分片 + 翻译出 brand_name/l*_category_name)。本模型目前无人查询,字段与
+    # 视图列保持一致以备将来 ORM 使用。
+    __tablename__ = "v_item_info"
 
     item_code = Column(String(50), primary_key=True)
     item_name = Column(String(500))

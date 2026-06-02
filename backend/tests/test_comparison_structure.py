@@ -427,7 +427,7 @@ async def test_query_brand_categories_two_step_sql():
     sql1 = str(session.execute.call_args_list[0][0][0]).lower()
     sql2 = str(session.execute.call_args_list[1][0][0]).lower()
     assert "t_brand" in sql1
-    assert "t_item_info" in sql2 and "t_category" in sql2
+    assert "v_item_info" in sql2
 
 
 @pytest.mark.asyncio

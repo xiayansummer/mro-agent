@@ -1,4 +1,5 @@
 from collections import defaultdict
+import re as _re
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,8 +12,35 @@ FILE_TYPE_MAP = {
 }
 
 
+# ── 名称 → sid 解析(过滤用 id 列才能下推到商品分片走索引)──────────────────
+
+
+async def _resolve_brand_sids(session: AsyncSession, brand: str) -> list[int]:
+    """品牌名 + 字典别名 → t_brand.sid 列表。下游用 brandId IN(...) 过滤可下推。"""
+    if not brand:
+        return []
+    from app.services.normalization import _seed_terms_for
+
+    terms = _seed_terms_for(brand) or [brand]
+    like = " OR ".join(f"brandName LIKE :t{i}" for i in range(len(terms)))
+    params = {f"t{i}": f"%{t}%" for i, t in enumerate(terms)}
+    rows = (await session.execute(text(f"SELECT sid FROM t_brand WHERE {like}"), params)).fetchall()
+    return [r[0] for r in rows]
+
+
+async def _resolve_category_sid(session: AsyncSession, name: str, level: int) -> int | None:
+    """品类名 + 层级 → t_category.sid。下游用 category{n}Id = sid 过滤可下推。"""
+    if not name:
+        return None
+    row = (await session.execute(
+        text("SELECT sid FROM t_category WHERE categoryName = :n AND categoryLevel = :l LIMIT 1"),
+        {"n": name, "l": level},
+    )).fetchone()
+    return row[0] if row else None
+
+
 async def attach_files(session: AsyncSession, sku_results: list[dict]) -> list[dict]:
-    """Batch-query t_item_file_sample and attach file info to each SKU result."""
+    """Batch-query v_item_file and attach file info to each SKU result."""
     codes = [s["item_code"] for s in sku_results]
     if not codes:
         return sku_results
@@ -20,16 +48,13 @@ async def attach_files(session: AsyncSession, sku_results: list[dict]) -> list[d
     placeholders = ",".join([f":c{i}" for i in range(len(codes))])
     query = f"""
         SELECT item_code, origin_file_name, file_path, file_type
-        FROM t_item_file_sample
+        FROM v_item_file
         WHERE item_code COLLATE utf8mb4_general_ci IN ({placeholders})
           AND is_published = 1
     """
     params = {f"c{i}": c for i, c in enumerate(codes)}
+    rows = (await session.execute(text(query), params)).fetchall()
 
-    result = await session.execute(text(query), params)
-    rows = result.fetchall()
-
-    # Group files by item_code
     files_by_code: dict[str, list[dict]] = defaultdict(list)
     for row in rows:
         item_code, file_name, file_url, file_type = row[0], row[1], row[2], str(row[3])
@@ -41,11 +66,7 @@ async def attach_files(session: AsyncSession, sku_results: list[dict]) -> list[d
 
     for sku in sku_results:
         sku["files"] = files_by_code.get(sku["item_code"], [])
-
     return sku_results
-
-
-import re as _re
 
 
 _STANDARD_PREFIXES = _re.compile(
@@ -55,10 +76,8 @@ _STANDARD_PREFIXES = _re.compile(
 
 
 def _looks_like_model_number(s: str) -> bool:
-    """Heuristic: mixed letters+digits, ≥5 chars → likely a machine/equipment model number.
-    Explicitly excludes international standard numbers (DIN931, ISO4762, GB5782, etc.)
-    which should be searched in specification/attribute_details, not mfg_sku only.
-    """
+    """Heuristic: mixed letters+digits, ≥5 chars → likely a machine/equipment model.
+    Excludes international standard numbers (DIN931, ISO4762, …)."""
     if _STANDARD_PREFIXES.match(s):
         return False
     return bool(
@@ -68,32 +87,79 @@ def _looks_like_model_number(s: str) -> bool:
     )
 
 
-async def search_skus(session: AsyncSession, parsed_intent: dict, limit: int = 20) -> list[dict]:
-    params = {}
+# 商品分片原表字段(分片内 WHERE 过滤用这些原始列名;id 过滤可下推、中文 LIKE 正常)。
+_SHARD_COLS = (
+    "itemCode, itemName, brandId, specificAtion, mfgSku, "
+    "category1Id, category2Id, category3Id, category4Id, itemDesc"
+)
 
-    # Category filters: exact equality so wrong-category fails fast into
-    # relaxed_search instead of substring-polluting into a sibling cluster.
-    # Safe because intent_parser snaps categories to _KNOWN_L{1,2,3} upstream.
-    cat_conditions = []
-    for i, key in enumerate(["l1_category", "l2_category", "l3_category", "l4_category"]):
-        col = f"{key}_name"
+
+def _items_union(inner_where: str) -> str:
+    """把过滤条件下推到每个商品分片的 WHERE,再 UNION ALL。
+
+    ⚠️ 中文 LIKE 必须在分片内(原表列)做。MySQL 对 UNION ALL derived table 在
+    *外层* 做中文 LIKE 会被优化器吞掉(恒返回 0,与字节/collation 无关),实测验证。
+    所以这里不查 v_item_info 视图,而是分片内过滤后再 UNION。
+    """
+    parts = [
+        f"SELECT {_SHARD_COLS} FROM t_item_info{('_%d' % i) if i else ''} "
+        f"WHERE deleted = 0 AND ({inner_where})"
+        for i in range(10)
+    ]
+    return " UNION ALL ".join(parts)
+
+
+async def _query_items(session: AsyncSession, inner_where: str, params: dict, limit: int) -> list:
+    """分片内过滤 → UNION → 外层 LEFT JOIN 出 brand/category 名称(展示用)。"""
+    union = _items_union(inner_where)
+    sql = f"""
+        SELECT u.itemCode, u.itemName, b.brandName, u.specificAtion, u.mfgSku,
+               c1.categoryName, c2.categoryName, c3.categoryName, c4.categoryName, u.itemDesc
+        FROM ({union}) u
+        LEFT JOIN t_brand b ON b.sid = u.brandId
+        LEFT JOIN t_category c1 ON c1.sid = u.category1Id
+        LEFT JOIN t_category c2 ON c2.sid = u.category2Id
+        LEFT JOIN t_category c3 ON c3.sid = u.category3Id
+        LEFT JOIN t_category c4 ON c4.sid = u.category4Id
+        LIMIT :limit
+    """
+    return (await session.execute(text(sql), {**params, "limit": limit})).fetchall()
+
+
+def _row_to_item(row) -> dict:
+    return {
+        "item_code": row[0], "item_name": row[1], "brand_name": row[2],
+        "specification": row[3], "mfg_sku": row[4],
+        "l1_category_name": row[5], "l2_category_name": row[6],
+        "l3_category_name": row[7], "l4_category_name": row[8],
+        "attribute_details": row[9],
+    }
+
+
+async def search_skus(session: AsyncSession, parsed_intent: dict, limit: int = 20) -> list[dict]:
+    # 分片内 WHERE 用原表字段(itemName / brandId / category{n}Id / specificAtion / mfgSku / itemDesc)
+    params: dict = {}
+
+    # 品类:名称 → sid → category{n}Id = sid(可下推)。解析不到 sid 说明库里没这个
+    # 品类,直接返回空,让上层 relaxed_search 接手。
+    base_conditions = []
+    for level, key in enumerate(["l1_category", "l2_category", "l3_category", "l4_category"], start=1):
         value = parsed_intent.get(key)
         if value:
-            cat_conditions.append(f"{col} = :cat_{i}")
-            params[f"cat_{i}"] = value
+            sid = await _resolve_category_sid(session, value, level)
+            if sid is None:
+                return []
+            base_conditions.append(f"category{level}Id = :cat_{level}")
+            params[f"cat_{level}"] = sid
 
-    # Keyword matching on item_name — ANY keyword must match (OR), not all (AND).
     keywords = parsed_intent.get("keywords", [])
     kw_clause = ""
     if keywords:
-        kw_clauses = [f"item_name LIKE :kw_{i}" for i in range(len(keywords))]
+        kw_clauses = [f"itemName LIKE :kw_{i}" for i in range(len(keywords))]
         kw_clause = f"({' OR '.join(kw_clauses)})"
         for i, kw in enumerate(keywords):
             params[f"kw_{i}"] = f"%{kw}%"
 
-    # Spec keywords: split into model numbers (mfg_sku only) vs regular specs (all fields).
-    # Model numbers (e.g. MFB381125) match mfg_sku ALONE — they don't require item_name match.
-    # Regular specs (e.g. M8, DIN931, 304) are AND-ed with keyword filter as before.
     spec_keywords = parsed_intent.get("spec_keywords", [])
     model_numbers = [sk for sk in spec_keywords if _looks_like_model_number(sk)]
     regular_specs = [sk for sk in spec_keywords if not _looks_like_model_number(sk)]
@@ -101,150 +167,93 @@ async def search_skus(session: AsyncSession, parsed_intent: dict, limit: int = 2
     regular_spec_clauses = []
     for i, sk in enumerate(regular_specs):
         regular_spec_clauses.append(
-            f"(item_name LIKE :sk_{i} OR specification LIKE :sk_{i}"
-            f" OR mfg_sku LIKE :sk_{i} OR attribute_details LIKE :sk_{i})"
+            f"(itemName LIKE :sk_{i} OR specificAtion LIKE :sk_{i}"
+            f" OR mfgSku LIKE :sk_{i} OR itemDesc LIKE :sk_{i})"
         )
         params[f"sk_{i}"] = f"%{sk}%"
 
     model_clauses = []
     for i, mn in enumerate(model_numbers):
-        model_clauses.append(f"mfg_sku LIKE :mn_{i}")
+        model_clauses.append(f"mfgSku LIKE :mn_{i}")
         params[f"mn_{i}"] = f"%{mn}%"
-        params[f"mn_eq_{i}"] = mn  # for fast-path exact match below
+        params[f"mn_eq_{i}"] = mn
 
-    # Brand filter — expand to all DB-side spellings clustered with this brand.
-    # Discovery is cached per canonical (TTL ~1h) so subsequent searches don't re-scan.
+    # 品牌:名称 → sid 列表 → brandId IN(可下推)
     brand = parsed_intent.get("brand")
     brand_clause = ""
     if brand:
-        from app.services.normalization import discover_brand_variants
-        variants = await discover_brand_variants(session, brand)
-        if variants:
-            placeholders = []
-            for i, v in enumerate(variants):
-                key = f"brand_v{i}"
-                placeholders.append(f":{key}")
-                params[key] = v
-            brand_clause = f"brand_name IN ({', '.join(placeholders)})"
+        brand_sids = await _resolve_brand_sids(session, brand)
+        if brand_sids:
+            ph = ", ".join(f":brand_s{i}" for i in range(len(brand_sids)))
+            for i, s in enumerate(brand_sids):
+                params[f"brand_s{i}"] = s
+            brand_clause = f"brandId IN ({ph})"
 
-    # When model numbers are present, run a dedicated compatibility search first.
-    # This guarantees model-matched products appear at the top of results,
-    # regardless of how many other products match the standard keyword filters.
+    # 型号优先:先做一轮型号兼容搜索,保证型号命中的商品置顶。
     compat_results = []
-    seen_codes: set[str] = set()
+    seen_codes: set = set()
 
     if model_clauses:
-        # Exact mfg_sku is the strongest signal — bypass category (intent_parser
-        # often mis-classifies L2 as L3). Brand still filters to avoid cross-brand
-        # collisions on shared model patterns.
-        compat_parts = []
+        compat_inner = []
         if brand_clause:
-            compat_parts.append(brand_clause)
-
-        select_cols = (
-            "SELECT item_code, item_name, brand_name, specification, mfg_sku, "
-            "l1_category_name, l2_category_name, l3_category_name, l4_category_name, "
-            "attribute_details FROM t_item_sample"
-        )
-        compat_params = {**params, "limit": limit}
-
-        # Fast path: exact mfg_sku match (uses idx_mfg_sku, sub-ms). Common case:
-        # users paste a full model number from a quote / BOM / spec sheet.
+            compat_inner.append(brand_clause)
         eq_in = ", ".join(f":mn_eq_{i}" for i in range(len(model_numbers)))
-        eq_where = " AND ".join(compat_parts + [f"mfg_sku IN ({eq_in})"])
-        rows = (await session.execute(
-            text(f"{select_cols} WHERE {eq_where} LIMIT :limit"), compat_params
-        )).fetchall()
+        eq_where = " AND ".join(compat_inner + [f"mfgSku IN ({eq_in})"])
+        rows = await _query_items(session, eq_where, params, limit)
         is_exact = bool(rows)
-
-        # Fallback: substring LIKE (no index but tolerates partial / dirty input).
         if not rows:
-            like_where = " AND ".join(compat_parts + [f"({' OR '.join(model_clauses)})"])
-            rows = (await session.execute(
-                text(f"{select_cols} WHERE {like_where} LIMIT :limit"), compat_params
-            )).fetchall()
-
+            like_where = " AND ".join(compat_inner + [f"({' OR '.join(model_clauses)})"])
+            rows = await _query_items(session, like_where, params, limit)
         for row in rows:
-            item = {
-                "item_code": row[0], "item_name": row[1], "brand_name": row[2],
-                "specification": row[3], "mfg_sku": row[4],
-                "l1_category_name": row[5], "l2_category_name": row[6],
-                "l3_category_name": row[7], "l4_category_name": row[8],
-                "attribute_details": row[9],
-            }
+            item = _row_to_item(row)
             if is_exact:
-                # Pin exact mfg_sku matches above preference ranking — when the
-                # user pastes a specific model, that IS the answer regardless
-                # of which brand they normally prefer.
                 item["_exact_match"] = True
             compat_results.append(item)
             seen_codes.add(row[0])
 
-    # Standard search (keyword + regular specs + categories)
-    standard_parts = []
+    # 标准搜索(品类 + 关键词 + 普通规格 + 品牌)
+    standard_inner = list(base_conditions)
+    sp = []
     if kw_clause:
-        standard_parts.append(kw_clause)
-    standard_parts.extend(regular_spec_clauses)
+        sp.append(kw_clause)
+    sp.extend(regular_spec_clauses)
     if brand_clause:
-        standard_parts.append(brand_clause)
+        sp.append(brand_clause)
+    if sp:
+        standard_inner.append(" AND ".join(sp))
 
-    all_conditions = cat_conditions[:]
-    if standard_parts:
-        all_conditions.append(" AND ".join(standard_parts))
-
-    if not all_conditions and not compat_results:
+    if not standard_inner and not compat_results:
         return []
 
     standard_results = []
     remaining = limit - len(compat_results)
-    if all_conditions and remaining > 0:
-        where_clause = " AND ".join(all_conditions)
-        params["limit"] = remaining
-        query = f"""
-            SELECT item_code, item_name, brand_name, specification, mfg_sku,
-                   l1_category_name, l2_category_name, l3_category_name, l4_category_name,
-                   attribute_details
-            FROM t_item_sample
-            WHERE {where_clause}
-            LIMIT :limit
-        """
-        result = await session.execute(text(query), params)
-        for row in result.fetchall():
+    if standard_inner and remaining > 0:
+        inner_where = " AND ".join(standard_inner)
+        rows = await _query_items(session, inner_where, params, remaining)
+        for row in rows:
             if row[0] not in seen_codes:
-                standard_results.append({
-                    "item_code": row[0], "item_name": row[1], "brand_name": row[2],
-                    "specification": row[3], "mfg_sku": row[4],
-                    "l1_category_name": row[5], "l2_category_name": row[6],
-                    "l3_category_name": row[7], "l4_category_name": row[8],
-                    "attribute_details": row[9],
-                })
+                standard_results.append(_row_to_item(row))
 
-    # Compat results first (model-matched), then standard results
     return compat_results + standard_results
 
 
 async def relaxed_search(session: AsyncSession, parsed_intent: dict, limit: int = 20) -> list[dict]:
     """Fallback search with progressively relaxed conditions."""
-
-    # Step 1: Drop spec_keywords (keep product type + categories)
     relaxed = {**parsed_intent, "spec_keywords": []}
     results = await search_skus(session, relaxed, limit)
     if results:
         return results
 
-    # Step 2: Drop l4 category
     relaxed = {**relaxed, "l4_category": None}
     results = await search_skus(session, relaxed, limit)
     if results:
         return results
 
-    # Step 3: Drop l3+l4
     relaxed = {**relaxed, "l3_category": None}
     results = await search_skus(session, relaxed, limit)
     if results:
         return results
 
-    # Step 4: Just keywords on item_name (no categories, no specs)
     keywords = parsed_intent.get("keywords", [])
     if keywords:
         relaxed = {"keywords": keywords, "brand": parsed_intent.get("brand")}
@@ -252,7 +261,6 @@ async def relaxed_search(session: AsyncSession, parsed_intent: dict, limit: int 
         if results:
             return results
 
-    # Step 5: Try individual keywords
     for kw in keywords:
         relaxed = {"keywords": [kw]}
         results = await search_skus(session, relaxed, limit)
@@ -263,10 +271,8 @@ async def relaxed_search(session: AsyncSession, parsed_intent: dict, limit: int 
 
 
 async def find_alternatives(session: AsyncSession, parsed_intent: dict, limit: int = 10) -> list[dict]:
-    """
-    Find similar products when exact match fails.
-    Ignores spec_keywords and brand — searches only by product type + category.
-    """
+    """Find similar products when exact match fails.
+    Ignores spec_keywords and brand — searches only by product type + category."""
     keywords = parsed_intent.get("keywords", [])
     l3 = parsed_intent.get("l3_category")
     l2 = parsed_intent.get("l2_category")
@@ -292,25 +298,21 @@ async def search_brand_clusters(
 ) -> list[tuple[str, int]]:
     """Brand-only fallback: return [(l3_category_name, sku_count), ...] for the brand.
 
-    Performs DB-side GROUP BY to avoid LIMIT-truncation skew. The first
-    sample of N rows could all belong to one L3, masking the brand's
-    other categories — that's why we aggregate in SQL, not memory.
+    品牌名 → t_brand.sid → v_item_info(全 10 分片视图)按 brand_id 聚合 l3 品类。
+    这里只按 brand_id 过滤 + 按 l3_category_name 聚合(无中文 LIKE),走视图无碍。
     """
-    if not brand:
+    sids = await _resolve_brand_sids(session, brand)
+    if not sids:
         return []
-    from app.services.normalization import discover_brand_variants
-    variants = await discover_brand_variants(session, brand)
-    if not variants:
-        return []
-    placeholders = ",".join(f":b{i}" for i in range(len(variants)))
-    params: dict = {f"b{i}": v for i, v in enumerate(variants)}
+    placeholders = ",".join(f":b{i}" for i in range(len(sids)))
+    params: dict = {f"b{i}": s for i, s in enumerate(sids)}
     params["lim"] = limit
-    result = await session.execute(
+    rows = (await session.execute(
         text(
             f"""
             SELECT l3_category_name, COUNT(*) AS cnt
-            FROM t_item_sample
-            WHERE brand_name IN ({placeholders})
+            FROM v_item_info
+            WHERE brand_id IN ({placeholders})
               AND l3_category_name IS NOT NULL
             GROUP BY l3_category_name
             ORDER BY cnt DESC
@@ -318,5 +320,5 @@ async def search_brand_clusters(
             """
         ),
         params,
-    )
-    return [(row[0], int(row[1])) for row in result.fetchall()]
+    )).fetchall()
+    return [(row[0], int(row[1])) for row in rows]

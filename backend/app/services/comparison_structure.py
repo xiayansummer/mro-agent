@@ -159,11 +159,12 @@ def _apply_brand_categories_to_slot(parsed: dict, slot: dict, categories: list[s
 
 
 async def _query_brand_categories(session, brand: str) -> list[str]:
-    """在 ERP 库查该品牌的真实经营 L3 品类(按 SKU 数降序)。
+    """查该品牌的真实经营 L3 品类(按 SKU 数降序)。
 
-    t_brand(品牌维度,主键 sid,brandName)→ t_item_info(商品,brandId/category3Id)
-    → t_category(品类维度,主键 sid,categoryName)。品牌名 + 字典别名都用来 LIKE
-    匹配 t_brand.brandName,兼顾"美和""美和 TOHO""MyMRO | 美和"等多条品牌记录。
+    第一步在 t_brand(主键 sid, brandName)按品牌名 + 字典别名 LIKE 找出品牌 sid
+    (兼顾"美和""美和 TOHO""MyMRO | 美和"等多条记录);第二步在 v_item_info 视图
+    (UNION 全 10 个商品分片 + 已过滤 deleted)按 brand_id 聚合 l3 品类。
+    过滤用 brand_id(而非 brand_name),可下推到各分片走索引,全量约 0.1~0.4s。
     """
     from app.services.normalization import _seed_terms_for
 
@@ -183,11 +184,11 @@ async def _query_brand_categories(session, brand: str) -> list[str]:
     cat_rows = await session.execute(
         text(
             f"""
-            SELECT c.categoryName, COUNT(*) AS cnt
-            FROM t_item_info i
-            JOIN t_category c ON c.sid = i.category3Id
-            WHERE i.brandId IN ({placeholders})
-            GROUP BY c.categoryName
+            SELECT l3_category_name, COUNT(*) AS cnt
+            FROM v_item_info
+            WHERE brand_id IN ({placeholders})
+              AND l3_category_name IS NOT NULL
+            GROUP BY l3_category_name
             ORDER BY cnt DESC
             LIMIT 6
             """
