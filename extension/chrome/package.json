@@ -1,0 +1,10 @@
+{
+  "name": "mro-compare-extension",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "MRO 外部比价 Chrome 扩展。package.json 仅供 Node 工具链(node --test / validation 脚本)识别 ESM,Chrome 加载扩展时不读取本文件。",
+  "scripts": {
+    "test": "node --test scripts/"
+  }
+}

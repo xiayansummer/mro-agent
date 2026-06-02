@@ -1,5 +1,8 @@
 export function parseZkhSearchPage(limit) {
-  if (!isSearchResultPage()) return [];
+  const pageUrl = location.href;
+  const pageText = document.body?.innerText || "";
+  const hasPriceSignal = /[¥￥]/.test(pageText);
+  const hasLoginWall = detectLoginWall(pageText);
 
   const cards = uniqueElements([
     ...document.querySelectorAll(
@@ -53,13 +56,13 @@ export function parseZkhSearchPage(limit) {
 
     if (offers.length >= limit) break;
   }
-  return offers;
+  return { url: pageUrl, offers, hasLoginWall, hasPriceSignal };
 
-  function isSearchResultPage() {
-    return (
-      /(^|\.)zkh\.com$/.test(location.hostname)
-      && /(search|product|goods|sku|item)/i.test(location.href)
-    );
+  function detectLoginWall(text) {
+    // 震坤行未登录/被拦截时常见的登录引导短语。用较强短语避免已登录页里
+    // 普通"登录"链接造成误判。⚠️ 具体短语需用真实未登录页样本最终校准
+    // (见 scripts/zkh-calibrate.console.js)。
+    return /请登录|登录后查看|登录查看|您(还|尚)未登录|未登录|立即登录|登录\/注册/.test(text);
   }
 
   function looksLikeProductCard(text) {
@@ -211,4 +214,56 @@ export function parseZkhSearchPage(limit) {
     }
     return Math.abs(hash).toString(36);
   }
+}
+
+// ───────────────────────────────────────────────────────────────────
+// 以下为 background 侧的纯判定函数(不依赖 document,可被 node --test 单测)。
+// parseZkhSearchPage 注入页面执行时是自包含的,不引用这些函数;
+// zkhSearch.js 采集到信号后调用它们做判定。
+// ───────────────────────────────────────────────────────────────────
+
+/**
+ * 收紧的"震坤行真实搜索结果页"URL 判定。
+ * 必须是 zkh.com 主域(排除 passport 等登录子域)、search 路径、且带 keyword(s) 参数。
+ * 旧逻辑 /(search|product|goods|sku|item)/ 过宽,未登录被打回的页面也可能命中。
+ */
+export function isZkhSearchResultUrl(href) {
+  let url;
+  try {
+    url = new URL(href);
+  } catch {
+    return false;
+  }
+  if (!/(^|\.)zkh\.com$/i.test(url.hostname)) return false;
+  if (/(^|\.)passport\.zkh\.com$/i.test(url.hostname)) return false;
+  if (!/search/i.test(url.pathname)) return false;
+  return url.searchParams.has("keywords") || url.searchParams.has("keyword");
+}
+
+/**
+ * 识别"订货编码"占位标题。震坤行未登录/默认页抓到的"商品"标题常是
+ * "订货编码:AExxxx" 或裸编码,而非真实商品名 —— 这类不应计为有效结果。
+ */
+export function isOrderCodePlaceholder(text) {
+  const value = String(text || "").trim();
+  if (!value) return false;
+  if (/^订货编码\s*[:：]/.test(value)) return true;
+  if (/^[A-Z]{1,4}\d{4,}$/i.test(value)) return true;
+  return false;
+}
+
+/**
+ * 综合页面信号 → 'results' | 'login_required' | 'empty'。
+ * - 非搜索 URL(被重定向)→ 需要登录
+ * - 有有效商品 → 结果
+ * - 有登录墙 → 需要登录
+ * - 无有效商品 + 无价格语义(疑似默认/拦截页)→ 需要登录
+ * - 真搜索页、无登录墙、有价格语义但无匹配 → 空结果
+ */
+export function classifyZkhPage({ isSearchUrl, validOfferCount, hasLoginWall, hasPriceSignal }) {
+  if (!isSearchUrl) return "login_required";
+  if (validOfferCount > 0) return "results";
+  if (hasLoginWall) return "login_required";
+  if (!hasPriceSignal) return "login_required";
+  return "empty";
 }

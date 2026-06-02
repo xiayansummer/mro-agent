@@ -12,6 +12,7 @@ import {
 } from "./taskApi.js";
 import { runJdSearchTask } from "./jdSearch.js";
 import { runZkhSearchTask } from "./zkhSearch.js";
+import { decideSubtaskOutcome } from "./taskOutcome.js";
 
 let taskRunning = false;
 
@@ -89,15 +90,19 @@ async function pollAndRunNextTask() {
     }
 
     const result = await runner(task);
-    if (result.error && result.offers.length === 0) {
+    // 由纯函数 decideSubtaskOutcome 决定落库状态:done / login_required / failed。
+    // login_required 是本次新增路径 —— 让"未登录拿到默认页"明确走登录引导,
+    // 而不是把垃圾当 done 展示、或笼统标 failed。
+    const outcome = decideSubtaskOutcome(result);
+    if (outcome.status !== "done") {
       await updateSubtaskStatus(
         settings.apiBase,
         settings.extToken,
         task.subtaskId,
-        "failed",
-        result.error,
+        outcome.status,
+        outcome.message,
       );
-      return { skipped: false, subtaskId: task.subtaskId, status: "failed" };
+      return { skipped: false, subtaskId: task.subtaskId, status: outcome.status };
     }
 
     await submitSubtaskResults(
