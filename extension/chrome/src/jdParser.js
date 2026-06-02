@@ -43,6 +43,7 @@ export function parseJdSearchPage(limit) {
       deliveryText: extractDeliveryText(text),
       productUrl: link,
       platformSku: extractSku(link, text),
+      imageUrl: extractImageUrl(card, link),
       rawRank: offers.length + 1,
       matchScore: 0,
       matchReasons: [],
@@ -159,6 +160,36 @@ export function parseJdSearchPage(limit) {
     if (urlMatch) return urlMatch[1];
     const textMatch = text.match(/(?:SKU|编码|货号)[:：\s]*([A-Za-z0-9_-]{4,})/i);
     return textMatch?.[1] || undefined;
+  }
+
+  function extractImageUrl(card, link) {
+    const fromCard = Array.from(card.querySelectorAll("img"))
+      .map((node) => node.currentSrc || node.src || node.getAttribute("data-lazy-img") || node.getAttribute("data-original") || "")
+      .map(normalizeImageUrl)
+      .find(Boolean);
+    if (fromCard) return fromCard;
+
+    try {
+      const url = new URL(link, location.origin);
+      const raw = url.searchParams.get("imgUrl");
+      if (raw) return normalizeImageUrl(decodeURIComponent(raw));
+    } catch {
+      // ignore invalid URLs
+    }
+    return undefined;
+  }
+
+  function normalizeImageUrl(value) {
+    const raw = String(value || "").trim();
+    if (!raw || raw.startsWith("data:")) return "";
+    if (raw.startsWith("//")) return `https:${raw}`;
+    if (/^https?:\/\//i.test(raw)) return raw;
+    if (raw.startsWith("jfs/")) return `https://img10.360buyimg.com/n1/${raw}`;
+    try {
+      return new URL(raw, location.origin).toString();
+    } catch {
+      return "";
+    }
   }
 
   function compactText(value) {

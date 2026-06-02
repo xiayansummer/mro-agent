@@ -45,6 +45,7 @@ export function parseZkhSearchPage(limit) {
       deliveryText: extractDeliveryText(text),
       productUrl: link,
       platformSku: extractSku(link, text),
+      imageUrl: extractImageUrl(card),
       rawRank: offers.length + 1,
       matchScore: 0,
       matchReasons: [],
@@ -163,6 +164,24 @@ export function parseZkhSearchPage(limit) {
     if (urlMatch) return urlMatch[1];
     const textMatch = text.match(/(?:SKU|编码|货号|订货号)[:：\s]*([A-Za-z0-9_-]{4,})/i);
     return textMatch?.[1] || undefined;
+  }
+
+  function extractImageUrl(card) {
+    return Array.from(card.querySelectorAll("img"))
+      .map((node) => node.currentSrc || node.src || node.getAttribute("data-src") || node.getAttribute("data-original") || node.getAttribute("lazy-src") || "")
+      .map(normalizeImageUrl)
+      .find(Boolean) || undefined;
+  }
+
+  function normalizeImageUrl(value) {
+    const raw = String(value || "").trim();
+    if (!raw || raw.startsWith("data:")) return "";
+    if (raw.startsWith("//")) return `https:${raw}`;
+    try {
+      return new URL(raw, location.origin).toString();
+    } catch {
+      return "";
+    }
   }
 
   function compactText(value) {

@@ -173,6 +173,7 @@ export interface ExternalOffer {
   deliveryText?: string;
   productUrl: string;
   platformSku?: string;
+  imageUrl?: string;
   rawRank: number;
   matchScore: number;
   matchReasons: string[];

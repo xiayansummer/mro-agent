@@ -164,6 +164,7 @@ function ComparisonTable({ offers, sessionId }: { offers: ExternalOffer[]; sessi
           <tr>
             <Th width={90}>反馈</Th>
             <Th width={74}>平台</Th>
+            <Th width={72}>图片</Th>
             <Th>候选商品</Th>
             <Th width={92}>品牌/SKU</Th>
             <Th width={120}>规格</Th>
@@ -204,6 +205,9 @@ function OfferRow({ offer, sessionId }: { offer: ExternalOffer; sessionId?: stri
         <div style={scoreStyle}>匹配 {Math.round(offer.matchScore || 0)}</div>
       </td>
       <td style={tdStyle}>
+        <OfferThumbnail offer={offer} />
+      </td>
+      <td style={tdStyle}>
         <a href={offer.productUrl} target="_blank" rel="noopener noreferrer" style={titleLinkStyle}>
           {offer.title}
         </a>
@@ -237,6 +241,23 @@ function OfferRow({ offer, sessionId }: { offer: ExternalOffer; sessionId?: stri
         </div>
       </td>
     </tr>
+  );
+}
+
+function OfferThumbnail({ offer }: { offer: ExternalOffer }) {
+  if (!offer.imageUrl) {
+    return <div style={thumbnailEmptyStyle}>无图</div>;
+  }
+  return (
+    <a href={offer.productUrl} target="_blank" rel="noopener noreferrer" style={thumbnailLinkStyle}>
+      <img
+        src={offer.imageUrl}
+        alt={offer.title}
+        loading="lazy"
+        referrerPolicy="no-referrer"
+        style={thumbnailImageStyle}
+      />
+    </a>
   );
 }
 
@@ -438,7 +459,7 @@ const tableWrapStyle: CSSProperties = {
 
 const tableStyle: CSSProperties = {
   width: "100%",
-  minWidth: 760,
+  minWidth: 840,
   borderCollapse: "collapse",
   fontSize: 12,
 };
@@ -467,6 +488,36 @@ const titleLinkStyle: CSSProperties = {
   color: "var(--text-primary)",
   textDecoration: "none",
   fontWeight: 600,
+};
+
+const thumbnailLinkStyle: CSSProperties = {
+  display: "block",
+  width: 54,
+  height: 54,
+  borderRadius: 8,
+  border: "1px solid var(--border)",
+  background: "#fff",
+  overflow: "hidden",
+};
+
+const thumbnailImageStyle: CSSProperties = {
+  width: "100%",
+  height: "100%",
+  objectFit: "contain",
+  display: "block",
+};
+
+const thumbnailEmptyStyle: CSSProperties = {
+  width: 54,
+  height: 54,
+  borderRadius: 8,
+  border: "1px dashed var(--border)",
+  color: "var(--text-muted)",
+  background: "#f8fafc",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  fontSize: 11,
 };
 
 const platformStyle: CSSProperties = {

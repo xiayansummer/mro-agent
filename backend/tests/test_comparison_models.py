@@ -25,11 +25,13 @@ def test_external_offer_required_fields_and_defaults():
         title="M8 不锈钢六角螺栓",
         unitComparable=False,
         productUrl="https://example.com/item",
+        imageUrl="https://example.com/image.jpg",
         rawRank=1,
         matchScore=85,
     )
 
     assert offer.currency == "CNY"
+    assert offer.imageUrl == "https://example.com/image.jpg"
     assert offer.matchReasons == []
 
 

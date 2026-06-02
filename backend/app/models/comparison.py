@@ -105,6 +105,7 @@ class ExternalOffer(BaseModel):
     deliveryText: Optional[str] = None
     productUrl: str
     platformSku: Optional[str] = None
+    imageUrl: Optional[str] = None
     rawRank: int
     matchScore: float = Field(ge=0.0)
     matchReasons: list[str] = Field(default_factory=list)
