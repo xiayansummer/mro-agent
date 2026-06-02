@@ -384,6 +384,43 @@ async def test_get_task_requeues_heartbeat_login_required_after_status_report(mo
 
 
 @pytest.mark.asyncio
+async def test_get_task_requeues_zkh_when_status_is_unknown(monkeypatch):
+    FakeSession.tasks["task-1"] = {
+        "id": "task-1",
+        "draft_id": "draft-1",
+        "user_id": 7,
+        "status": "partial",
+        "created_at": datetime(2026, 1, 1),
+        "completed_at": None,
+    }
+    FakeSession.subtasks["subtask-1"] = {
+        "id": "subtask-1",
+        "task_id": "task-1",
+        "platform": "zkh",
+        "status": "login_required",
+        "search_terms_json": json.dumps(["zkh term"]),
+        "items_json": None,
+        "error_json": json.dumps({"code": "login_required", "message": "平台未登录或登录态未知"}),
+        "leased_until": None,
+        "created_at": datetime(2026, 1, 1),
+        "updated_at": datetime(2026, 1, 1),
+    }
+
+    async def fake_status(user_id):
+        return ExtensionStatus(
+            online=True,
+            platforms=[PlatformStatus(platform="zkh", loggedIn=None)],
+        )
+
+    monkeypatch.setattr(comparison_task_service.extension_service, "get_extension_status", fake_status)
+
+    task = await comparison_task_service.get_task("task-1", "u7")
+
+    assert task["status"] == "queued"
+    assert task["subtasks"][0]["status"] == "queued"
+
+
+@pytest.mark.asyncio
 async def test_get_task_does_not_requeue_verification_failure(monkeypatch):
     FakeSession.tasks["task-1"] = {
         "id": "task-1",

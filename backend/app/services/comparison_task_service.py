@@ -258,7 +258,7 @@ async def _requeue_resolved_login_required_subtasks(
     logged_in_platforms = {
         item.platform
         for item in extension_status.platforms
-        if item.loggedIn is True
+        if item.loggedIn is True or (item.platform == "zkh" and item.loggedIn is None)
     }
     if not logged_in_platforms:
         return 0
