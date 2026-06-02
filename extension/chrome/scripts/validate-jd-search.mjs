@@ -77,6 +77,7 @@ async function main() {
           priceText: offer.priceText || null,
           productUrl: offer.productUrl,
           platformSku: offer.platformSku || null,
+          imageUrl: offer.imageUrl || null,
         })),
       });
     }

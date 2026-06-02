@@ -163,14 +163,36 @@ export function parseJdSearchPage(limit) {
   }
 
   function extractImageUrl(card, link) {
+    const fromLinkedImage = imageUrlFromProductLinks(card);
+    if (fromLinkedImage) return fromLinkedImage;
+
     const fromCard = Array.from(card.querySelectorAll("img"))
-      .map((node) => node.currentSrc || node.src || node.getAttribute("data-lazy-img") || node.getAttribute("data-original") || "")
+      .flatMap((node) => [
+        node.getAttribute("data-lazy-img"),
+        node.getAttribute("data-original"),
+        node.getAttribute("data-src"),
+        node.getAttribute("srcset")?.split(",")[0]?.trim().split(/\s+/)[0],
+        node.currentSrc,
+        node.src,
+      ])
       .map(normalizeImageUrl)
       .find(Boolean);
     if (fromCard) return fromCard;
 
+    const fromLink = imageUrlFromHref(link);
+    if (fromLink) return fromLink;
+    return undefined;
+  }
+
+  function imageUrlFromProductLinks(card) {
+    return Array.from(card.querySelectorAll("a[href]"))
+      .map((node) => imageUrlFromHref(node.href))
+      .find(Boolean);
+  }
+
+  function imageUrlFromHref(href) {
     try {
-      const url = new URL(link, location.origin);
+      const url = new URL(href, location.origin);
       const raw = url.searchParams.get("imgUrl");
       if (raw) return normalizeImageUrl(decodeURIComponent(raw));
     } catch {
@@ -181,7 +203,7 @@ export function parseJdSearchPage(limit) {
 
   function normalizeImageUrl(value) {
     const raw = String(value || "").trim();
-    if (!raw || raw.startsWith("data:")) return "";
+    if (!raw || raw.startsWith("data:") || isPlaceholderImage(raw)) return "";
     if (raw.startsWith("//")) return `https:${raw}`;
     if (/^https?:\/\//i.test(raw)) return raw;
     if (raw.startsWith("jfs/")) return `https://img10.360buyimg.com/n1/${raw}`;
@@ -190,6 +212,10 @@ export function parseJdSearchPage(limit) {
     } catch {
       return "";
     }
+  }
+
+  function isPlaceholderImage(value) {
+    return /blank|placeholder|loading|lazyload|default|transparent|spacer|grey\.gif|gray\.gif|no[-_]?image/i.test(value);
   }
 
   function compactText(value) {
