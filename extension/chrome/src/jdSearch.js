@@ -1,4 +1,5 @@
 import { parseJdSearchPage } from "./jdParser.js";
+import { hasBrandMatch, normalizeRequiredBrand } from "./brandMatch.js";
 
 const MAX_RESULTS_PER_TERM = 10;
 const MIN_RESULTS_TO_STOP = 5;
@@ -6,8 +7,10 @@ const TERM_TIMEOUT_MS = 12000;
 
 export async function runJdSearchTask(task) {
   const searchTerms = task.searchTerms || [];
+  const requiredBrand = normalizeRequiredBrand(task.requiredBrand);
   let lastSearchTerm = "";
   let lastError = "";
+  let bestPartial = null;
 
   for (const searchTerm of searchTerms) {
     lastSearchTerm = searchTerm;
@@ -18,6 +21,11 @@ export async function runJdSearchTask(task) {
         `京东搜索超时：${searchTerm}`,
       );
       const offers = result.offers || [];
+      if (requiredBrand && offers.length > 0 && !hasBrandMatch(offers, requiredBrand)) {
+        bestPartial ??= { searchTerm, offers };
+        lastError = `京东搜索词「${searchTerm}」未命中品牌「${requiredBrand}」，继续尝试更宽泛搜索词`;
+        continue;
+      }
       if (offers.length >= MIN_RESULTS_TO_STOP) {
         return { searchTerm, offers };
       }
@@ -30,6 +38,7 @@ export async function runJdSearchTask(task) {
     }
   }
 
+  if (bestPartial) return bestPartial;
   return {
     searchTerm: lastSearchTerm,
     offers: [],

@@ -221,9 +221,10 @@ async def lease_next_subtask(ext_token: str) -> Optional[dict]:
         candidate_result = await session.execute(
             text(
                 """
-                SELECT st.id, st.task_id, st.platform, st.search_terms_json
+                SELECT st.id, st.task_id, st.platform, st.search_terms_json, d.structure_json
                 FROM comparison_subtasks st
                 JOIN comparison_tasks t ON t.id = st.task_id
+                JOIN comparison_drafts d ON d.id = t.draft_id
                 WHERE t.user_id = :uid
                   AND st.status = :queued
                   AND (st.leased_until IS NULL OR st.leased_until < :now)
@@ -273,6 +274,7 @@ async def lease_next_subtask(ext_token: str) -> Optional[dict]:
         "taskId": candidate[1],
         "platform": candidate[2],
         "searchTerms": _loads(candidate[3]) or [],
+        "requiredBrand": _required_brand_from_structure(candidate[4]),
         "leasedUntil": int(leased_until.timestamp() * 1000),
     }
 
@@ -411,6 +413,12 @@ def _blocked_subtask(platform: str, terms: list[str], code: str, message: str) -
         "status": ComparisonSubtaskStatus.LOGIN_REQUIRED.value,
         "error": {"code": code, "message": message},
     }
+
+
+def _required_brand_from_structure(raw_structure: str | None) -> str:
+    structure = _loads(raw_structure) if raw_structure else {}
+    brand = structure.get("specification", {}).get("brand") if isinstance(structure, dict) else None
+    return str(brand or "").strip()
 
 
 def _task_status_for_subtasks(subtasks: list[dict]) -> str:

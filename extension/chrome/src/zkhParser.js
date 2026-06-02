@@ -105,26 +105,42 @@ export function parseZkhSearchPage(limit) {
 
   function extractTitle(card, fallbackText) {
     const selectors = [
+      "a[title]",
       "[class*='title']",
       "[class*='name']",
-      "[class*='sku']",
       "[class*='product']",
-      "a[title]",
+      "[class*='goods']",
+      "[class*='commodity']",
       "a",
     ];
     for (const selector of selectors) {
       const node = card.matches?.(selector) ? card : card.querySelector(selector);
       const value = compactText(node?.getAttribute("title") || node?.innerText || "");
-      if (value && value.length >= 4 && !/登录|注册|购物车|客服/.test(value)) {
+      if (looksLikeTitle(value)) {
         return value.slice(0, 160);
       }
     }
-    return fallbackText.split(/\n|¥|￥/)[0].slice(0, 160);
+    const fallback = fallbackText
+      .split(/¥|￥|加入购物车|购物车|现货|库存/)
+      .map(compactText)
+      .find(looksLikeTitle);
+    return (fallback || "").slice(0, 160);
+  }
+
+  function looksLikeTitle(value) {
+    const text = compactText(value);
+    if (text.length < 4) return false;
+    if (/登录|注册|购物车|客服|订货编码|订货号|货号|SKU|编码[:：]|品牌[:：]|型号[:：]|规格[:：]/i.test(text)) return false;
+    if (/^[A-Z]{1,4}\d{4,}$/i.test(text)) return false;
+    return /[\u4e00-\u9fa5A-Za-z]/.test(text);
   }
 
   function extractBrand(text) {
     const match = text.match(/品牌[:：\s]*([^\s｜|，,]+)/);
-    return match?.[1] || undefined;
+    if (match?.[1]) return match[1];
+    if (/诺霸|NORBAR/i.test(text)) return "诺霸";
+    if (/美和|TOHO/i.test(text)) return "美和";
+    return undefined;
   }
 
   function extractSpecText(text) {

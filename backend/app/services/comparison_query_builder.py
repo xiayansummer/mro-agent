@@ -26,8 +26,11 @@ def _build_ordered_terms(structure: ComparisonStructure) -> list[str]:
     candidates = []
     if brand:
         candidates.append(_join_tokens([brand, product_type, model, *spec_tokens]))
-    candidates.append(_join_tokens([product_type, model, *spec_tokens]))
-    candidates.append(_join_tokens([product_type, *spec_tokens[:2]]))
+        candidates.append(_join_tokens([brand, product_type, model, *spec_tokens[:2]]))
+        candidates.append(_join_tokens([brand, product_type, model]))
+    else:
+        candidates.append(_join_tokens([product_type, model, *spec_tokens]))
+        candidates.append(_join_tokens([product_type, *spec_tokens[:2]]))
 
     if structure.category.l3 and _clean_token(structure.category.l3) != product_type:
         candidates.append(_join_tokens([structure.category.l3, *spec_tokens[:2]]))
@@ -47,7 +50,7 @@ def _spec_tokens(structure: ComparisonStructure) -> list[str]:
 
 
 def _join_tokens(tokens: list[str | None]) -> str:
-    return " ".join(token for token in (_clean_token(token) for token in tokens) if token)
+    return " ".join(_dedupe(token for token in (_clean_token(token) for token in tokens) if token))
 
 
 def _clean_token(token: str | None) -> str:

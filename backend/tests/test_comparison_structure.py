@@ -266,10 +266,38 @@ def test_build_search_terms_prioritizes_brand_and_core_specs():
     terms = build_search_terms(structure)
 
     assert terms.jd[0] == "固万基 外六角螺栓 DIN933 304 M8"
-    assert terms.jd[1] == "外六角螺栓 DIN933 304 M8"
+    assert terms.jd[1] == "固万基 外六角螺栓 DIN933 304"
+    assert terms.jd[2] == "固万基 外六角螺栓"
     assert 2 <= len(terms.jd) <= 3
     assert terms.jd == terms.zkh
     assert all("紧固密封 框架结构" not in term for term in terms.jd)
+
+
+def test_build_search_terms_keeps_brand_relaxed_fallback():
+    structure = ComparisonStructure(
+        category=ComparisonCategory(
+            l1="物料搬运 存储包装",
+            l2="起重工具及设备",
+            l3="葫芦绞车",
+        ),
+        specification=ComparisonSpecification(
+            productType="手拉葫芦",
+            brand="美和",
+            size="1吨",
+            attributes=[
+                {"name": "起升高度", "value": "3米"},
+                {"name": "链条结构", "value": "单行链"},
+            ],
+        ),
+    )
+
+    terms = build_search_terms(structure)
+
+    assert terms.jd == [
+        "美和 手拉葫芦 1吨 3米 单行链",
+        "美和 手拉葫芦 1吨 3米",
+        "美和 手拉葫芦",
+    ]
 
 
 def test_build_search_terms_omits_empty_brand():

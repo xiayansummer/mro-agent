@@ -104,6 +104,7 @@ class FakeSession:
                         subtask["task_id"],
                         subtask["platform"],
                         subtask["search_terms_json"],
+                        _structure_json(),
                     ))
             return FakeResult()
 
@@ -204,12 +205,12 @@ def _subtask_row(subtask):
     )
 
 
-def _structure_json():
+def _structure_json(brand=None):
     return json.dumps({
         "category": {"l3": "六角头螺栓", "confidence": 0.8, "alternatives": []},
         "specification": {
             "productType": "外六角螺栓",
-            "brand": None,
+            "brand": brand,
             "model": None,
             "material": "304",
             "size": "M8",
@@ -317,8 +318,14 @@ async def test_lease_next_subtask_marks_subtask_in_progress(monkeypatch):
     assert leased["subtaskId"] == "subtask-1"
     assert leased["platform"] == "jd"
     assert leased["searchTerms"] == ["jd term"]
+    assert leased["requiredBrand"] == ""
     assert FakeSession.subtasks["subtask-1"]["status"] == "in_progress"
     assert FakeSession.tasks["task-1"]["status"] == "running"
+
+
+def test_required_brand_from_structure_reads_spec_brand():
+    assert comparison_task_service._required_brand_from_structure(_structure_json("美和")) == "美和"
+    assert comparison_task_service._required_brand_from_structure(_structure_json()) == ""
 
 
 @pytest.mark.asyncio
