@@ -73,3 +73,18 @@ async def test_parse_intent_falls_back_on_llm_error(monkeypatch):
     assert result["query_type"] == "vague"
     assert result["keywords"] == []
     assert result["brand"] is None
+
+
+# ── M-6: _millis 把 naive(UTC)datetime 按 UTC 解释,不依赖运行机器时区 ────────
+def test_millis_interprets_naive_datetime_as_utc():
+    from datetime import datetime
+    from app.services.comparison_task_service import _millis
+    # DB 读出的 naive datetime 代表 UTC 值,转 epoch 必须按 UTC,
+    # 否则在非 UTC 机器/容器上会偏移整数小时(本地 CST 会偏 -8h)。
+    dt = datetime(2026, 6, 3, 1, 35, 32)
+    assert _millis(dt) == 1780450532000  # 2026-06-03T01:35:32Z 的毫秒 epoch
+
+
+def test_millis_none_returns_zero():
+    from app.services.comparison_task_service import _millis
+    assert _millis(None) == 0

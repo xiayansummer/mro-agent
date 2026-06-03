@@ -1,6 +1,6 @@
 import json
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from sqlalchemy import text
@@ -638,4 +638,10 @@ def _loads(value):
 
 
 def _millis(value) -> int:
-    return int(value.timestamp() * 1000) if value else 0
+    # DB 读出的是 naive datetime(代表 UTC 值)。裸 .timestamp() 会按运行机器本地
+    # 时区解释,非 UTC 容器上会偏整数小时;显式声明为 UTC,与机器时区解耦。
+    if not value:
+        return 0
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return int(value.timestamp() * 1000)

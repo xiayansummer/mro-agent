@@ -11,6 +11,10 @@ engine = create_async_engine(
     # 之前就主动回收,规避间歇性 "MySQL server has gone away"。
     pool_recycle=240,
     pool_pre_ping=False,
+    # 每条连接钉死 session 时区为 UTC:让 DB 端 CURRENT_TIMESTAMP / NOW() /
+    # ON UPDATE 始终按 UTC 写入,与应用 datetime.utcnow() 对齐,不再依赖 MySQL
+    # 主机的 SYSTEM 时区(当前恰好 UTC,但迁到 CST 主机会立刻偏 8h)。
+    connect_args={"init_command": "SET time_zone = '+00:00'"},
     echo=False,
 )
 
