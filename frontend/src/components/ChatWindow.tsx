@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { ChatMessage, ComparisonPlatform } from "../types";
 import { getComparisonTask, retryComparisonPlatform, sendMessage, startComparisonDraft } from "../services/api";
 import MessageBubble from "./MessageBubble";
@@ -54,13 +54,24 @@ export default function ChatWindow({ sessionId, messages, onMessagesChange, onTo
   }, [messages, scrollToBottom]);
 
   useEffect(() => { return () => abortRef.current?.abort(); }, []);
+  // 仅在"活跃比价任务集合(id:status)"真正变化时才变,避免流式 chunk 改 content
+  // 触发该 effect cleanup+重建 setInterval(原依赖 [messages] 会每个 chunk 重建)。
+  const activeTaskKey = useMemo(
+    () =>
+      messages
+        .filter((message) => message.comparisonTask && ["queued", "running", "partial"].includes(message.comparisonTask.status))
+        .map((message) => `${message.comparisonTask!.id}:${message.comparisonTask!.status}`)
+        .join(","),
+    [messages]
+  );
   useEffect(() => {
-    const activeTaskMessages = messages.filter((message) =>
-      message.comparisonTask && ["queued", "running", "partial"].includes(message.comparisonTask.status)
-    );
-    if (activeTaskMessages.length === 0) return;
+    if (activeTaskKey === "") return;
 
     const timer = window.setInterval(async () => {
+      const activeTaskMessages = messagesRef.current.filter((message) =>
+        message.comparisonTask && ["queued", "running", "partial"].includes(message.comparisonTask.status)
+      );
+      if (activeTaskMessages.length === 0) return;
       const updates = await Promise.allSettled(
         activeTaskMessages.map((message) => getComparisonTask(message.comparisonTask!.id))
       );
@@ -78,7 +89,7 @@ export default function ChatWindow({ sessionId, messages, onMessagesChange, onTo
     }, 2500);
 
     return () => window.clearInterval(timer);
-  }, [messages, updateMessages]);
+  }, [activeTaskKey, updateMessages]);
 
   const handleScroll = useCallback(() => {
     const el = containerRef.current;

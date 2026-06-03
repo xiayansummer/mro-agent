@@ -20,6 +20,10 @@ from app.services.agent import handle_message
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+# Hold strong refs to fire-and-forget tasks so the GC can't collect them mid-flight
+# (the event loop only keeps weak refs). Tasks self-remove on completion.
+_background_tasks: set = set()
+
 
 class ChatRequest(BaseModel):
     session_id: str
@@ -91,7 +95,7 @@ async def _capturing_stream(
         # Persist after the stream ends (also runs on client disconnect)
         assistant_text = "".join(text_parts)
         # Don't await — fire and forget, don't block the response close
-        asyncio.ensure_future(
+        _task = asyncio.ensure_future(
             chat_history_service.save_turn(
                 session_id=session_id,
                 user_id=user_id,
@@ -104,6 +108,8 @@ async def _capturing_stream(
                 comparison_draft=comparison_draft,
             )
         )
+        _background_tasks.add(_task)
+        _task.add_done_callback(_background_tasks.discard)
 
 
 @router.post("/chat")

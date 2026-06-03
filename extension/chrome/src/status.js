@@ -14,18 +14,28 @@ export async function collectPlatformStatus() {
   }
 }
 
+let heartbeatInFlight = false;
+
 export async function sendHeartbeat() {
   const settings = await getSettings();
   if (!settings.extToken) {
     return { skipped: true, reason: "not_bound" };
   }
 
-  await reportStatus(settings.apiBase, settings.extToken, {
-    deviceName: settings.deviceName,
-    platforms: await collectPlatformStatus(),
-  });
+  // 60s alarm 与手动触发可能重叠;并发执行会重复打开探测页且 last-write-wins。
+  // 与 background.js 的 taskRunning 守卫对齐,飞行中直接跳过。
+  if (heartbeatInFlight) return { skipped: true, reason: "in_flight" };
+  heartbeatInFlight = true;
+  try {
+    await reportStatus(settings.apiBase, settings.extToken, {
+      deviceName: settings.deviceName,
+      platforms: await collectPlatformStatus(),
+    });
 
-  const lastHeartbeatAt = new Date().toISOString();
-  await chrome.storage.local.set({ lastHeartbeatAt });
-  return { skipped: false, lastHeartbeatAt };
+    const lastHeartbeatAt = new Date().toISOString();
+    await chrome.storage.local.set({ lastHeartbeatAt });
+    return { skipped: false, lastHeartbeatAt };
+  } finally {
+    heartbeatInFlight = false;
+  }
 }

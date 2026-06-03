@@ -35,7 +35,6 @@ pairButton.addEventListener("click", async () => {
     await chrome.storage.local.set({
       extToken: result.extToken,
       sessionId: result.sessionId,
-      apiBase: settings.apiBase,
       deviceName: settings.deviceName,
     });
     settings = await getSettings();

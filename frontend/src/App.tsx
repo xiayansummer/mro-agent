@@ -15,6 +15,10 @@ import {
 
 const LEGACY_STORAGE_KEY = "mro-chat-sessions";
 
+// 本地新建、尚未发到服务器的空白会话的判定窗口(ms)。懒加载 effect 与
+// handleNewChat 必须复用同一值,否则该窗口内会对从未持久化的本地随机 id 发无谓 GET。
+const LOCAL_BLANK_TTL_MS = 60_000;
+
 function generateId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2);
 }
@@ -95,7 +99,7 @@ export default function App() {
   useEffect(() => {
     if (!activeSession || activeSession.messages.length > 0) return;
     // Newly-created blank session (never sent to server) has createdAt very recent — skip fetch
-    const isNewBlank = activeSession.title === "新对话" && Date.now() - activeSession.createdAt < 5000;
+    const isNewBlank = activeSession.title === "新对话" && Date.now() - activeSession.createdAt < LOCAL_BLANK_TTL_MS;
     if (isNewBlank) return;
     getSession(activeSession.id)
       .then(detail => {
@@ -134,7 +138,7 @@ export default function App() {
         (s) =>
           s.title === "新对话" &&
           s.messages.length === 0 &&
-          Date.now() - s.createdAt < 60_000,
+          Date.now() - s.createdAt < LOCAL_BLANK_TTL_MS,
       );
       if (fresh) {
         setActiveId(fresh.id);

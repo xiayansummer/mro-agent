@@ -22,6 +22,9 @@ from app.services import user_service
 
 logger = logging.getLogger(__name__)
 
+# Hold strong refs to fire-and-forget tasks so the GC can't collect them mid-flight.
+_background_tasks: set = set()
+
 
 class MemoryService:
     def __init__(self):
@@ -223,7 +226,9 @@ class MemoryService:
             new_count = await user_service.increment_session_count(user_id)
             if new_count is not None and new_count % 10 == 0:
                 logger.info(f"Memos: triggering preference memo update for user {user_id[:8]} (session #{new_count})")
-                asyncio.ensure_future(self.update_preference_memo(user_id))
+                _task = asyncio.ensure_future(self.update_preference_memo(user_id))
+                _background_tasks.add(_task)
+                _task.add_done_callback(_background_tasks.discard)
         except Exception as e:
             logger.error(f"Memos: increment_session_count failed: {e}")
 

@@ -13,6 +13,9 @@ logger = logging.getLogger(__name__)
 _MAX_SESSIONS = 500
 _MAX_CONVERSATION = 12
 
+# Hold strong refs to fire-and-forget tasks so the GC can't collect them mid-flight.
+_background_tasks: set = set()
+
 
 def _slot_context_summary(slot: dict) -> str:
     summary = slot.get("summary") or ""
@@ -143,7 +146,7 @@ async def handle_message(
     ctx["conversation"].append({"role": "user", "content": user_message})
     ctx["conversation"].append({"role": "assistant", "content": f"[已创建比价草稿: {product_type}]"})
 
-    asyncio.ensure_future(
+    _task = asyncio.ensure_future(
         memory_service.save_session_summary(
             user_id=effective_user_id,
             user_message=user_message,
@@ -153,5 +156,7 @@ async def handle_message(
             query_type=parsed.get("query_type", "comparison"),
         )
     )
+    _background_tasks.add(_task)
+    _task.add_done_callback(_background_tasks.discard)
 
     yield "event: done\ndata: \n\n"

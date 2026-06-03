@@ -19,9 +19,13 @@ async def test_capturing_stream_persists_comparison_draft(monkeypatch):
         saved.update(kwargs)
 
     scheduled = []
+    real_ensure_future = chat.asyncio.ensure_future
+
     def fake_ensure_future(coro):
-        scheduled.append(coro)
-        return coro
+        # 返回真实 Task(而非裸 coroutine),才支持 L-1 加的 add_done_callback 强引用跟踪
+        task = real_ensure_future(coro)
+        scheduled.append(task)
+        return task
 
     monkeypatch.setattr(chat, "handle_message", fake_handle_message)
     monkeypatch.setattr(chat.chat_history_service, "save_turn", fake_save_turn)
