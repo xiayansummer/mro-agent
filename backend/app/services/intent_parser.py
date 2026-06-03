@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 from openai import OpenAI
 from app.config import settings
 from app.services.normalization import (
@@ -9,6 +10,7 @@ from app.services.normalization import (
     normalize_category,
 )
 
+logger = logging.getLogger(__name__)
 client = OpenAI(api_key=settings.AI_API_KEY, base_url=settings.AI_BASE_URL)
 
 SYSTEM_PROMPT = """你是一个资深的MRO（工业品）采购专家。你的任务是将用户的自然语言描述解析为结构化的搜索参数。
@@ -567,24 +569,37 @@ async def parse_intent(
 
     # 同步 OpenAI client 放到线程池,避免阻塞事件循环(单 worker uvicorn 下
     # 否则一次 LLM 往返会冻结所有并发请求:他人 SSE、扩展轮询全被串行化)。
-    response = await asyncio.to_thread(
-        lambda: client.chat.completions.create(
-            model=model,
-            max_tokens=1024,
-            messages=[{"role": "system", "content": system_prompt}] + messages,
-            extra_body={"enable_thinking": False},
+    # LLM 偶发空 content / 非法 JSON 时兜底返回 vague,避免 REST 端点直接 500。
+    try:
+        response = await asyncio.to_thread(
+            lambda: client.chat.completions.create(
+                model=model,
+                max_tokens=1024,
+                messages=[{"role": "system", "content": system_prompt}] + messages,
+                extra_body={"enable_thinking": False},
+            )
         )
-    )
-
-    text = response.choices[0].message.content.strip()
-
-    # Extract JSON from response (handle possible markdown wrapping)
-    start = text.find("{")
-    end = text.rfind("}") + 1
-    if start >= 0 and end > start:
-        text = text[start:end]
-
-    parsed = json.loads(text)
+        text = (response.choices[0].message.content or "").strip()
+        # Extract JSON from response (handle possible markdown wrapping)
+        start = text.find("{")
+        end = text.rfind("}") + 1
+        if start >= 0 and end > start:
+            text = text[start:end]
+        parsed = json.loads(text)
+    except Exception as e:
+        logger.warning("parse_intent LLM/JSON 解析失败,返回 vague 兜底: %s", e)
+        return {
+            "query_type": "vague",
+            "need_clarification": False,
+            "keywords": [],
+            "spec_keywords": [],
+            "brand": None,
+            "l1_category": None,
+            "l2_category": None,
+            "l3_category": None,
+            "l4_category": None,
+            "attribute_gaps": [],
+        }
 
     # Alias-based safety net (in case LLM emits non-canonical brand/L1/L2 names).
     # E.g. brand "TOHO" → "美和", L1 "搬运" → "物料搬运 存储包装".

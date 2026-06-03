@@ -1,12 +1,17 @@
 import asyncio
 import json
 import logging
+from collections import OrderedDict
 from collections.abc import AsyncGenerator
 
 from app.services import chat_history_service, comparison_draft_service
 from app.services.memory_service import memory_service
 
 logger = logging.getLogger(__name__)
+
+# 内存会话上限:防止 _sessions 字典与单会话 conversation 无界增长(慢速内存泄漏)。
+_MAX_SESSIONS = 500
+_MAX_CONVERSATION = 12
 
 
 def _slot_context_summary(slot: dict) -> str:
@@ -29,17 +34,28 @@ def _slot_context_summary(slot: dict) -> str:
 
 # In-memory session store for hot multi-turn conversations.
 # DB chat history is the source of truth for cold starts / multi-replica traffic.
-_sessions: dict[str, dict] = {}
+# 用 OrderedDict 做 LRU:超过 _MAX_SESSIONS 淘汰最久未用的,防无界增长。
+_sessions: "OrderedDict[str, dict]" = OrderedDict()
 
 
 async def get_session_context(session_id: str, user_id: str = "") -> dict:
-    if session_id not in _sessions:
-        _sessions[session_id] = {
+    ctx = _sessions.get(session_id)
+    if ctx is None:
+        ctx = {
             "conversation": await _load_session_conversation(session_id, user_id),
             "last_intent": None,
             "last_results": None,
         }
-    return _sessions[session_id]
+        _sessions[session_id] = ctx
+        while len(_sessions) > _MAX_SESSIONS:
+            _sessions.popitem(last=False)  # 淘汰最久未访问的会话
+    else:
+        _sessions.move_to_end(session_id)
+        # 裁剪单会话历史,避免长会话 conversation 无界累积
+        conv = ctx["conversation"]
+        if len(conv) > _MAX_CONVERSATION:
+            ctx["conversation"] = conv[-_MAX_CONVERSATION:]
+    return ctx
 
 
 async def _load_session_conversation(session_id: str, user_id: str) -> list[dict]:

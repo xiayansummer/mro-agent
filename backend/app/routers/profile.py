@@ -28,7 +28,10 @@ async def import_erp_history(
     if len(file_bytes) > 10 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="文件大小不能超过 10 MB")
 
-    rows = parse_rows(file_bytes, filename)
+    try:
+        rows = parse_rows(file_bytes, filename)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail="文件无法解析，请确认是有效的 Excel / CSV 文件") from e
     if not rows:
         raise HTTPException(status_code=422, detail="无法识别文件列名，请确保含产品编码或产品名称列")
 

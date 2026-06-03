@@ -74,7 +74,11 @@ async function collectJdSearchResults(searchTerm) {
       args: [MAX_RESULTS_PER_TERM],
     });
     const offers = result?.result || [];
-    if (offers.length > 0) return { offers };
+    if (offers.length > 0) {
+      // 成功拿到结果 → 清掉之前可能残留的京东验证横幅(pendingJdVerification)
+      await chrome.storage.local.remove("pendingJdVerification").catch(() => {});
+      return { offers };
+    }
 
     const [diagnostics] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },

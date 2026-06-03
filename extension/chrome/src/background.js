@@ -37,9 +37,11 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === "MRO_SEND_HEARTBEAT") {
     sendHeartbeat()
-      .then(async (result) => {
-        const task = await pollAndRunNextTask();
-        sendResponse({ ok: true, result, task });
+      .then((result) => {
+        // 心跳成功立即反馈;任务轮询失败不应污染"心跳成功"的结果 —— 否则
+        // popup 会误显示"状态上报失败",诱使用户无谓重新绑定。
+        pollAndRunNextTask().catch((e) => console.warn("MRO poll after heartbeat failed:", e));
+        sendResponse({ ok: true, result });
       })
       .catch((error) => sendResponse({ ok: false, error: error.message }));
     return true;
