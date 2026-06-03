@@ -73,7 +73,7 @@ export default function ComparisonTaskCard({ task, sessionId, onRefresh, onRetry
       )}
 
       {offers.length > 0 ? (
-        <ComparisonTable offers={offers.slice(0, 10)} sessionId={sessionId} />
+        <ComparisonTable offers={offers} sessionId={sessionId} />
       ) : (
         <div style={emptyStyle}>
           {task.status === "queued" || task.status === "running"
