@@ -275,10 +275,15 @@ async def save_turn(
         async with AsyncSessionLocal() as s:
             # Upsert session
             r = await s.execute(
-                text("SELECT id, title FROM t_chat_session WHERE id = :id"),
+                text("SELECT id, title, user_id FROM t_chat_session WHERE id = :id"),
                 {"id": session_id},
             )
             existing = r.fetchone()
+            if existing is not None and existing[2] != db_id:
+                # 会话存在但属于别的用户:拒写,避免跨用户写入(写侧 IDOR)。
+                # session_id 由前端生成、客户端可控,不校验会被用来污染他人历史。
+                logger.warning("save_turn refused: session %s owned by another user", session_id)
+                return
             if existing is None:
                 await s.execute(
                     text(
