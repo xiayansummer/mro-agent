@@ -114,3 +114,29 @@ async def test_image_base64_flows_through_to_parse_intent(monkeypatch):
     )
 
     assert captured["image_base64"] == "IMGDATA"
+
+
+# ── DPO 偏好硬加权: get_preference_signals 解析 #preference memo 为结构化偏好 ──
+@pytest.mark.asyncio
+async def test_get_preference_signals_parses_preference_memo(monkeypatch):
+    from app.services.memory_service import memory_service
+
+    async def fake_list_memos(uid_tag, extra_tag=None, limit=10):
+        return [{"content": "## 用户偏好摘要\n偏好品牌：美和, 沪工\n常用品类：手拉葫芦\n常用规格：2吨\n"}]
+
+    monkeypatch.setattr(memory_service, "list_memos", fake_list_memos)
+    sig = await memory_service.get_preference_signals("u1")
+    assert sig["brands"] == ["美和", "沪工"]
+    assert sig["categories"] == ["手拉葫芦"]
+
+
+@pytest.mark.asyncio
+async def test_get_preference_signals_empty_when_no_memo(monkeypatch):
+    from app.services.memory_service import memory_service
+
+    async def fake_list_memos(uid_tag, extra_tag=None, limit=10):
+        return []
+
+    monkeypatch.setattr(memory_service, "list_memos", fake_list_memos)
+    sig = await memory_service.get_preference_signals("u1")
+    assert sig == {"brands": [], "categories": []}

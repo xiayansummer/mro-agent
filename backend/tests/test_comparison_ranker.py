@@ -119,3 +119,36 @@ def test_rank_no_brand_filter_when_brand_absent():
     ]
     ranked = rank_external_offers(structure, offers)
     assert len(ranked) == 2
+
+
+def test_preference_brand_boosts_offer_ranking():
+    """用户历史偏好品牌(DPO 硬加权)→ 命中 offer 显著加分、顶到前面。"""
+    structure = ComparisonStructure(
+        specification=ComparisonSpecification(productType="手拉葫芦"),
+    )
+    offers = [
+        {"id": "other", "title": "沪工 手拉葫芦 2吨", "priceValue": 90, "rawRank": 1},
+        {"id": "preferred", "title": "美和 手拉葫芦 2吨", "priceValue": 100, "rawRank": 2},
+    ]
+    # 无偏好:两者 productType 都匹配,按价格 other(90<100) 在前
+    baseline = rank_external_offers(structure, offers)
+    assert baseline[0]["id"] == "other"
+    # 有偏好"美和":preferred 被偏好加分顶到第一
+    ranked = rank_external_offers(
+        structure, offers, preferences={"brands": ["美和"], "categories": []}
+    )
+    assert ranked[0]["id"] == "preferred"
+    assert any("偏好品牌" in r for r in ranked[0]["matchReasons"])
+    pref_score = next(o["matchScore"] for o in ranked if o["id"] == "preferred")
+    base_score = next(o["matchScore"] for o in baseline if o["id"] == "preferred")
+    assert pref_score > base_score
+
+
+def test_preference_none_leaves_scoring_unchanged():
+    """preferences=None → 不加偏好分,行为与原来一致。"""
+    structure = ComparisonStructure(
+        specification=ComparisonSpecification(productType="手拉葫芦"),
+    )
+    offers = [{"id": "a", "title": "美和 手拉葫芦", "priceValue": 10, "rawRank": 1}]
+    ranked = rank_external_offers(structure, offers, preferences=None)
+    assert not any("偏好品牌" in r for r in ranked[0]["matchReasons"])

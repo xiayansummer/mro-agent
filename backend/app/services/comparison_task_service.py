@@ -14,7 +14,8 @@ from app.models.comparison import (
 )
 from app.services import extension_service
 from app.services.comparison_ranker import rank_external_offers
-from app.services.user_service import _external_id_to_db_id
+from app.services.memory_service import memory_service
+from app.services.user_service import _external_id_to_db_id, db_id_to_external_id
 
 SUBTASK_LEASE_SECONDS = 90
 
@@ -449,12 +450,18 @@ async def submit_subtask_results(
         if structure is None:
             return False
 
+        # 取用户历史偏好,传入 ranker 做 DPO 硬加权(命中偏好品牌/品类显著提分)。
+        # get_preference_signals 内部已 try/except,失败返回空、不阻塞排序。
+        preferences = await memory_service.get_preference_signals(
+            db_id_to_external_id(extension_session["userId"])
+        )
+
         items = [
             {
                 **offer,
                 "selectedSearchTerm": search_term,
             }
-            for offer in rank_external_offers(structure, offers)
+            for offer in rank_external_offers(structure, offers, preferences=preferences)
         ]
         result = await session.execute(
             text(

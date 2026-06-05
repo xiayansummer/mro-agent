@@ -4,13 +4,23 @@ from typing import Any
 from app.models.comparison import ComparisonStructure
 from app.services.normalization import text_matches_brand
 
+# 用户历史偏好(DPO)在排序里的硬加权:命中偏好品牌/品类时显著提分。
+# 数值可调——调大让历史偏好对最终排序的影响更强。品牌权重高于品牌匹配(18),
+# 这样当前未指定品牌时,历史偏好品牌能把对应 offer 顶上来。
+_PREF_BRAND_BONUS = 25.0
+_PREF_CATEGORY_BONUS = 10.0
 
-def rank_external_offers(structure: ComparisonStructure | dict | None, offers: list[dict]) -> list[dict]:
+
+def rank_external_offers(
+    structure: ComparisonStructure | dict | None,
+    offers: list[dict],
+    preferences: dict | None = None,
+) -> list[dict]:
     if not offers:
         return []
 
     normalized_structure = _structure_dict(structure)
-    scored = [_score_offer(normalized_structure, offer, index) for index, offer in enumerate(offers)]
+    scored = [_score_offer(normalized_structure, offer, index, preferences) for index, offer in enumerate(offers)]
     ranked = sorted(
         scored,
         key=lambda offer: (
@@ -31,7 +41,7 @@ def rank_external_offers(structure: ComparisonStructure | dict | None, offers: l
     return ranked
 
 
-def _score_offer(structure: dict, offer: dict, index: int) -> dict:
+def _score_offer(structure: dict, offer: dict, index: int, preferences: dict | None = None) -> dict:
     haystack = _offer_text(offer)
     score = 0.0
     reasons = []
@@ -81,6 +91,20 @@ def _score_offer(structure: dict, offer: dict, index: int) -> dict:
     if _stock_required(structure) and _looks_out_of_stock(offer):
         score -= 20
         reasons.append("库存不满足约束")
+
+    # 用户历史偏好硬加权(DPO):命中偏好品牌/品类时显著提分。
+    # 各取首个命中即可,避免同一 offer 因多个偏好项重复累加。
+    if preferences:
+        for pref_brand in preferences.get("brands") or []:
+            if pref_brand and text_matches_brand(haystack, pref_brand):
+                score += _PREF_BRAND_BONUS
+                reasons.append(f"符合您的偏好品牌：{pref_brand}")
+                break
+        for pref_cat in preferences.get("categories") or []:
+            if pref_cat and _clean(pref_cat).lower() in haystack:
+                score += _PREF_CATEGORY_BONUS
+                reasons.append(f"符合您的常用品类：{pref_cat}")
+                break
 
     if offer.get("priceValue") is not None:
         score += 2

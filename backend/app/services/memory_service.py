@@ -337,6 +337,34 @@ class MemoryService:
         except Exception as e:
             logger.error(f"Memos: update_preference_memo failed: {e}", exc_info=True)
 
+    async def get_preference_signals(self, user_id: str) -> dict:
+        """提取结构化用户偏好(品牌/品类),供 comparison_ranker 排序硬加权(DPO)用。
+        读最新 #preference memo,解析'偏好品牌：'/'常用品类：'行;失败返回空。"""
+        uid_tag = _uid_tag(user_id)
+        try:
+            memos = await self.list_memos(uid_tag, extra_tag="preference", limit=3)
+        except Exception as e:
+            logger.warning(f"Memos: get_preference_signals failed: {e}")
+            return {"brands": [], "categories": []}
+
+        def _parse(value: str) -> list[str]:
+            for sep in ("、", "，"):
+                value = value.replace(sep, ",")
+            return [x.strip() for x in value.split(",") if x.strip() and x.strip() != "暂无"]
+
+        brands: list[str] = []
+        categories: list[str] = []
+        for memo in memos:
+            for line in (memo.get("content") or "").splitlines():
+                if line.startswith("偏好品牌："):
+                    brands += _parse(line.split("：", 1)[1])
+                elif line.startswith("常用品类："):
+                    categories += _parse(line.split("：", 1)[1])
+        return {
+            "brands": list(dict.fromkeys(brands)),
+            "categories": list(dict.fromkeys(categories)),
+        }
+
     async def _delete_memo(self, memo_name: str) -> None:
         """删除指定 memo（按 name 字段，格式为 'memos/xxx'）。"""
         if not memo_name:

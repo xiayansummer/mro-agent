@@ -93,6 +93,11 @@ def _external_id_to_db_id(external_user_id: str) -> Optional[int]:
         return None
 
 
+def db_id_to_external_id(db_id: int) -> str:
+    """Forward of _external_id_to_db_id: DB 整数 user id → external user id(memory keys 等用)。"""
+    return f"u{db_id}"
+
+
 async def increment_session_count(external_user_id: str) -> Optional[int]:
     """
     Atomically +1 on session_count and return the new value.
