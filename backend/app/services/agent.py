@@ -106,6 +106,7 @@ async def handle_message(
             message=user_message,
             conversation_context=conv_messages,
             memory_context=memory_context,
+            image_base64=image_base64,
         )
     except Exception as e:
         logger.error(f"Comparison draft creation failed: {e}", exc_info=True)

@@ -88,3 +88,29 @@ def test_millis_interprets_naive_datetime_as_utc():
 def test_millis_none_returns_zero():
     from app.services.comparison_task_service import _millis
     assert _millis(None) == 0
+
+
+# ── M-14: image_base64 从 create_draft_from_message 一路透传到 parse_intent ──
+@pytest.mark.asyncio
+async def test_image_base64_flows_through_to_parse_intent(monkeypatch):
+    from app.services import comparison_structure, comparison_draft_service
+
+    captured = {}
+
+    async def fake_parse_intent(user_message, conversation_context=None, memory_context="", image_base64=""):
+        captured["image_base64"] = image_base64
+        # 返回 vague:_has_procurement_object 为假 → build 提前返回,链路不碰 DB
+        return {
+            "query_type": "vague", "need_clarification": False,
+            "keywords": [], "spec_keywords": [], "brand": None,
+            "l1_category": None, "l2_category": None,
+            "l3_category": None, "l4_category": None, "attribute_gaps": [],
+        }
+
+    monkeypatch.setattr(comparison_structure, "parse_intent", fake_parse_intent)
+
+    await comparison_draft_service.create_draft_from_message(
+        user_id="u1", session_id="s1", message="看看这个轴承", image_base64="IMGDATA",
+    )
+
+    assert captured["image_base64"] == "IMGDATA"

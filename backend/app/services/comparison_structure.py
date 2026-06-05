@@ -27,11 +27,13 @@ async def build_comparison_structure(
     user_message: str,
     conversation_context: list[dict] | None = None,
     memory_context: str = "",
+    image_base64: str = "",
 ) -> ComparisonStructureResult:
     parsed = await parse_intent(
         user_message,
         conversation_context=conversation_context,
         memory_context=memory_context,
+        image_base64=image_base64,
     )
 
     if not _has_procurement_object(parsed):
