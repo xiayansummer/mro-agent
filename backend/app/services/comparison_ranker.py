@@ -10,8 +10,10 @@ from app.services.normalization import text_matches_brand
 _PREF_BRAND_BONUS = 25.0
 _PREF_CATEGORY_BONUS = 10.0
 
-# 匹配度低于此分的 offer 视为"离谱结果"(连产品类型都没匹配上),不展示。可调。
-_MIN_DISPLAY_SCORE = 10.0
+# 相对过滤:展示阈值 = max(绝对地板, 最高分 × 比例)。高分场景(有强匹配)抬高阈值、滤掉
+# 远不如它的离谱结果;低分场景(整体弱匹配)落到地板、不误杀,保住召回。两值都可调。
+_MIN_DISPLAY_SCORE = 10.0      # 绝对地板:连这都不到的是纯噪声
+_DISPLAY_SCORE_RATIO = 0.35    # 相对:低于"最高分 × 此比例"的视为不相关
 
 
 def rank_external_offers(
@@ -42,8 +44,12 @@ def rank_external_offers(
         if on_brand:
             ranked = on_brand
 
-    # 滤掉匹配度过低(< _MIN_DISPLAY_SCORE)的结果:与需求相关性太差,展示反而干扰。
-    return [offer for offer in ranked if (offer.get("matchScore") or 0) >= _MIN_DISPLAY_SCORE]
+    # 相对过滤(见上方常量):有强匹配时抬高阈值滤离谱,整体弱匹配时落到地板保召回。
+    if not ranked:
+        return []
+    top_score = ranked[0].get("matchScore") or 0  # ranked 已按 matchScore 降序
+    threshold = max(_MIN_DISPLAY_SCORE, top_score * _DISPLAY_SCORE_RATIO)
+    return [offer for offer in ranked if (offer.get("matchScore") or 0) >= threshold]
 
 
 def _score_offer(structure: dict, offer: dict, index: int, preferences: dict | None = None) -> dict:
@@ -52,9 +58,18 @@ def _score_offer(structure: dict, offer: dict, index: int, preferences: dict | N
     reasons = []
 
     product_type = _clean(structure.get("specification", {}).get("productType"))
-    if product_type and _contains_all_tokens(haystack, product_type):
-        score += 30
-        reasons.append(f"产品类型匹配：{product_type}")
+    if product_type:
+        # 程度化匹配:productType 多词时按命中词比例给分(全含 30、半含 15…),替代全词
+        # 二元——电商标题不规范,要求所有词精确命中过严,会误杀相关结果(召回兜底)。
+        pt_tokens = _tokens(product_type)
+        if pt_tokens:
+            hits = sum(1 for token in pt_tokens if _compact(token) in _compact(haystack))
+            if hits == len(pt_tokens):
+                score += 30
+                reasons.append(f"产品类型匹配：{product_type}")
+            elif hits:
+                score += round(30 * hits / len(pt_tokens), 2)
+                reasons.append(f"产品类型部分匹配：{product_type}")
 
     brand = _clean(structure.get("specification", {}).get("brand"))
     if brand and text_matches_brand(haystack, brand):

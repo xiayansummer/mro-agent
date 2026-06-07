@@ -1,6 +1,6 @@
 from app.models.comparison import ComparisonSearchTerms, ComparisonStructure
 
-MAX_TERMS_PER_PLATFORM = 3
+MAX_TERMS_PER_PLATFORM = 4
 MAX_SPEC_TOKENS = 4
 
 
@@ -21,6 +21,11 @@ def _build_ordered_terms(structure: ComparisonStructure) -> list[str]:
 
     brand = _clean_token(structure.specification.brand)
     spec_tokens = _spec_tokens(structure)
+    # 核心品类词:多词品类(如 LLM 把"防电弧绝缘手套"拆成"防电弧手套 绝缘手套")降到最后
+    # 一个词(中文复合品类里上位品类通常在末尾)。保证降级序列总有一档足够宽、能在平台
+    # 搜到——这是召回兜底。单词品类时 core==product_type,被 _dedupe 自然去重、不引入冗余。
+    pt_words = product_type.split()
+    core = pt_words[-1] if len(pt_words) > 1 else product_type
 
     # 搜索词刻意不带型号:厂家内部型号(如 HSZ-622A)在京东/震坤行的商品标题里常不存在,
     # 带上反而搜不到结果;"品牌+品类+规格"才是平台最有效的检索模式。型号由
@@ -30,10 +35,12 @@ def _build_ordered_terms(structure: ComparisonStructure) -> list[str]:
         candidates.append(_join_tokens([brand, product_type, *spec_tokens]))
         candidates.append(_join_tokens([brand, product_type, *spec_tokens[:2]]))
         candidates.append(_join_tokens([brand, product_type]))
+        candidates.append(_join_tokens([brand, core]))
     else:
         candidates.append(_join_tokens([product_type, *spec_tokens]))
         candidates.append(_join_tokens([product_type, *spec_tokens[:2]]))
         candidates.append(_join_tokens([product_type]))
+        candidates.append(_join_tokens([core]))
 
     if structure.category.l3 and _clean_token(structure.category.l3) != product_type:
         candidates.append(_join_tokens([structure.category.l3, *spec_tokens[:2]]))

@@ -223,3 +223,85 @@ def test_search_terms_exclude_model_for_recall():
     assert all("HSZ-622A" not in t for t in terms.zkh), terms.zkh
     # 但保留"品牌+品类(+规格)"这种平台能搜到的有效词
     assert any("美和" in t and "手拉葫芦" in t for t in terms.jd)
+
+
+# ── 环节1(系统性,非特例):多词品类降级序列必含"单核心品类词"最宽档,保证召回 ──
+def test_search_terms_multiword_producttype_has_core_word_fallback():
+    from app.models.comparison import ComparisonStructure, ComparisonSpecification
+    from app.services.comparison_query_builder import build_search_terms
+
+    # 用三个不同品类验证系统性:核心词取多词品类的最后一个词(通常是上位品类)
+    cases = [
+        ("防电弧手套 绝缘手套", "安全牌", "安全牌 绝缘手套"),
+        ("不锈钢 法兰", "某牌", "某牌 法兰"),
+        ("外六角 螺栓", "固万基", "固万基 螺栓"),
+    ]
+    for product_type, brand, expected_core_term in cases:
+        s = ComparisonStructure(
+            specification=ComparisonSpecification(productType=product_type, brand=brand)
+        )
+        jd = build_search_terms(s).jd
+        assert expected_core_term in jd, (product_type, jd)
+
+    # 单词品类:核心词==品类,不引入重复
+    s_single = ComparisonStructure(
+        specification=ComparisonSpecification(productType="球阀", brand="某牌")
+    )
+    jd_single = build_search_terms(s_single).jd
+    assert jd_single == list(dict.fromkeys(jd_single))  # 无重复项
+
+
+# ── 环节2(系统性):productType 部分命中按比例给分,替代全词二元,避免相关结果被误杀 ──
+def test_producttype_partial_match_scored_proportionally():
+    from app.models.comparison import ComparisonStructure, ComparisonSpecification
+    from app.services.comparison_ranker import rank_external_offers
+
+    structure = ComparisonStructure(
+        specification=ComparisonSpecification(productType="防电弧手套 绝缘手套")
+    )
+    offers = [
+        {"id": "partial", "title": "绝缘手套 5KV 电工", "priceValue": 50, "rawRank": 1},
+        {"id": "full", "title": "防电弧手套 绝缘手套 Class00", "priceValue": 60, "rawRank": 2},
+    ]
+    ranked = rank_external_offers(structure, offers)
+    by_id = {o["id"]: o for o in ranked}
+    # 部分命中("绝缘手套")也保留并拿到正分,全命中分更高
+    assert "full" in by_id and "partial" in by_id, [o["id"] for o in ranked]
+    assert by_id["full"]["matchScore"] > by_id["partial"]["matchScore"]
+    assert by_id["partial"]["matchScore"] > 0
+    assert any("部分匹配" in r for r in by_id["partial"]["matchReasons"])
+
+
+# ── 环节3(系统性):相对过滤替代绝对阈值——低分群保召回、高分时滤离谱 ──────────────
+def test_relative_filter_keeps_recall_when_all_scores_low():
+    from app.models.comparison import ComparisonStructure, ComparisonSpecification
+    from app.services.comparison_ranker import rank_external_offers
+
+    structure = ComparisonStructure(
+        specification=ComparisonSpecification(productType="防电弧手套 绝缘手套")
+    )
+    # 全部只部分匹配(绝缘手套),无高分基准 → 不应被误杀(绝对阈值会全保留,相对也应保留)
+    offers = [{"id": f"g{i}", "title": "绝缘手套 5KV", "priceValue": 50 + i, "rawRank": i} for i in range(4)]
+    ranked = rank_external_offers(structure, offers)
+    assert len(ranked) == 4, [o["matchScore"] for o in ranked]
+
+
+def test_relative_filter_drops_low_relative_when_top_high():
+    from app.models.comparison import ComparisonStructure, ComparisonSpecification
+    from app.services.comparison_ranker import rank_external_offers
+
+    structure = ComparisonStructure(
+        specification=ComparisonSpecification(
+            productType="防电弧手套 绝缘手套", material="橡胶", standard="GB17622",
+            attributes=[{"name": "电压", "value": "5KV"}, {"name": "等级", "value": "00级"}],
+        )
+    )
+    offers = [
+        {"id": "top", "title": "防电弧手套 绝缘手套 橡胶 GB17622 5KV 00级", "priceValue": 50, "rawRank": 1},
+        {"id": "weak", "title": "绝缘手套 普通款", "priceValue": 30, "rawRank": 2},
+    ]
+    ranked = rank_external_offers(structure, offers)
+    ids = [o["id"] for o in ranked]
+    assert "top" in ids
+    # weak 仅部分匹配(~17 分),远低于 top,相对过滤应滤掉(绝对阈值 10 下本会保留)
+    assert "weak" not in ids, [(o["id"], o["matchScore"]) for o in ranked]

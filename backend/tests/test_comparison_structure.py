@@ -268,7 +268,7 @@ def test_build_search_terms_prioritizes_brand_and_core_specs():
     assert terms.jd[0] == "固万基 外六角螺栓 DIN933 304 M8"
     assert terms.jd[1] == "固万基 外六角螺栓 DIN933 304"
     assert terms.jd[2] == "固万基 外六角螺栓"
-    assert 2 <= len(terms.jd) <= 3
+    assert 3 <= len(terms.jd) <= 4  # 末档为 l3 类目召回兜底(MAX_TERMS=4)
     assert terms.jd == terms.zkh
     assert all("紧固密封 框架结构" not in term for term in terms.jd)
 
@@ -297,6 +297,7 @@ def test_build_search_terms_keeps_brand_relaxed_fallback():
         "美和 手拉葫芦 1吨 3米 单行链",
         "美和 手拉葫芦 1吨 3米",
         "美和 手拉葫芦",
+        "葫芦绞车 1吨 3米",  # l3 类目召回兜底档(MAX_TERMS=4)
     ]
 
 
