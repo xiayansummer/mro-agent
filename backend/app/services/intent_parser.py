@@ -519,9 +519,9 @@ def _normalize_category(value: str | None, known: list[str]) -> str | None:
     return value  # no match — return as-is, REPLACE in SQL is the safety net
 
 
-VISION_PREFIX = """你是一个资深的MRO（工业品）采购专家，同时擅长从图片识别工业产品。
+VISION_PREFIX = """【本次输入包含一张产品图片】请先从图片中识别出产品类型与可见规格（尺寸/材质/标准/型号/品牌等），把它作为用户需求的补充信息，与下方用户的文字描述合并。
 
-用户上传了一张产品图片，请结合图片内容和用户的文字描述，识别产品类型、可见规格（尺寸/材质/标准等），然后解析为结构化搜索参数。
+合并后，严格按照下面完全相同的规则解析：图片识别出的参数与文字提供的参数一视同仁，使用同一套判断标准和输出格式，不要因为信息来自图片而额外推测或放宽标准。
 
 """
 
