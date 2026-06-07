@@ -29,6 +29,7 @@ class ChatRequest(BaseModel):
     session_id: str
     message: str
     image_base64: Optional[str] = None  # Base64-encoded image for vision queries
+    skip_clarification: bool = False     # 用户点"直接检索"/已提交 slot → 跳过参数追问
 
 
 def _parse_sse_text(data_line: str) -> str:
@@ -44,6 +45,7 @@ async def _capturing_stream(
     session_id: str,
     user_message: str,
     image_b64: str,
+    skip_clarification: bool = False,
 ) -> AsyncIterator[str]:
     """
     Wrap the agent generator: forward each event to the client unchanged,
@@ -57,7 +59,7 @@ async def _capturing_stream(
 
     pending_event: str = ""
     try:
-        async for chunk in handle_message(session_id, user_message, user_id, image_b64):
+        async for chunk in handle_message(session_id, user_message, user_id, image_b64, skip_clarification):
             yield chunk
 
             # SSE events are formatted as "event: X\ndata: Y\n\n" — parse to extract structured content.
@@ -118,7 +120,7 @@ async def chat(
     user_id: str = Depends(require_user_id),
 ):
     return StreamingResponse(
-        _capturing_stream(user_id, req.session_id, req.message, req.image_base64 or ""),
+        _capturing_stream(user_id, req.session_id, req.message, req.image_base64 or "", req.skip_clarification),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

@@ -103,7 +103,7 @@ export default function ChatWindow({ sessionId, messages, onMessagesChange, onTo
 
   const handleStop = useCallback(() => { abortRef.current?.abort(); }, []);
 
-  const handleSend = async (text: string, imageBase64?: string, imageUrl?: string) => {
+  const handleSend = async (text: string, imageBase64?: string, imageUrl?: string, skipClarification?: boolean) => {
     const userMsg: ChatMessage = { id: generateId(), role: "user", content: text, imageUrl };
     const assistantMsgId = generateId();
     const assistantMsg: ChatMessage = { id: assistantMsgId, role: "assistant", content: "", isStreaming: true };
@@ -170,7 +170,7 @@ export default function ChatWindow({ sessionId, messages, onMessagesChange, onTo
           updateMessages(next);
           setIsLoading(false);
         },
-      }, abortController.signal, imageBase64);
+      }, abortController.signal, imageBase64, skipClarification);
     } catch (err: unknown) {
       if (err instanceof DOMException && err.name === "AbortError") {
         const next = messagesRef.current.map((m) =>
@@ -295,7 +295,7 @@ export default function ChatWindow({ sessionId, messages, onMessagesChange, onTo
               message={msg}
               isFirst={i === 0}
               sessionId={sessionId}
-              onChipSubmit={(text) => handleSend(text)}
+              onChipSubmit={(text) => handleSend(text, undefined, undefined, true)}
               onComparisonStart={handleComparisonStart}
               onComparisonRefresh={handleComparisonRefresh}
               onComparisonRetry={handleComparisonRetry}

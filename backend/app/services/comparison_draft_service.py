@@ -22,12 +22,14 @@ async def create_draft_from_message(
     conversation_context: list[dict] | None = None,
     memory_context: str = "",
     image_base64: str = "",
+    skip_clarification: bool = False,
 ) -> dict:
     result = await build_comparison_structure(
         message,
         conversation_context=conversation_context,
         memory_context=memory_context,
         image_base64=image_base64,
+        skip_clarification=skip_clarification,
     )
     if not result.shouldCreateDraft or not result.structure:
         return {

@@ -80,6 +80,7 @@ async def handle_message(
     user_message: str,
     user_id: str = "",
     image_base64: str = "",
+    skip_clarification: bool = False,
 ) -> AsyncGenerator[str, None]:
     """Main agent orchestration: create external comparison draft via SSE."""
     # Immediately acknowledge receipt so the UI shows activity
@@ -107,6 +108,7 @@ async def handle_message(
             conversation_context=conv_messages,
             memory_context=memory_context,
             image_base64=image_base64,
+            skip_clarification=skip_clarification,
         )
     except Exception as e:
         logger.error(f"Comparison draft creation failed: {e}", exc_info=True)

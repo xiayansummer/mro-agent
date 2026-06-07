@@ -52,6 +52,14 @@ export default function SlotClarificationCard({ slot, disabled = false, onSubmit
     onSubmit(composed);
   };
 
+  // 直接检索:不再追问,带上已知参数(不强制选答案)直接走比价
+  const handleSkip = () => {
+    if (isLocked) return;
+    const knownTexts = slot.known.map((item) => `${item.label}${item.value}`).filter(Boolean);
+    const composed = [slot.summary, ...knownTexts].filter(Boolean).join(" ");
+    onSubmit(composed || slot.summary || "直接检索");
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") {
       e.preventDefault();
@@ -202,6 +210,22 @@ export default function SlotClarificationCard({ slot, disabled = false, onSubmit
               }}
             >
               提交
+            </button>
+            <button
+              onClick={handleSkip}
+              title="跳过参数确认,用已知信息直接检索"
+              style={{
+                padding: "6px 12px",
+                border: "1px solid var(--border)",
+                borderRadius: 6,
+                background: "transparent",
+                color: "var(--text-secondary)",
+                cursor: "pointer",
+                fontSize: 13,
+                whiteSpace: "nowrap",
+              }}
+            >
+              直接检索
             </button>
           </div>
         </div>

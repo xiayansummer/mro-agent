@@ -140,3 +140,38 @@ async def test_get_preference_signals_empty_when_no_memo(monkeypatch):
     monkeypatch.setattr(memory_service, "list_memos", fake_list_memos)
     sig = await memory_service.get_preference_signals("u1")
     assert sig == {"brands": [], "categories": []}
+
+
+# ── 直接检索: skip_clarification 跳过参数追问,避免反复问未知参数 ─────────────
+@pytest.mark.asyncio
+async def test_skip_clarification_bypasses_slot_questions(monkeypatch):
+    from app.services import comparison_structure as cs
+
+    async def fake_parse_intent(user_message, conversation_context=None, memory_context="", image_base64=""):
+        return {
+            "query_type": "comparison", "keywords": ["防电弧手套"], "spec_keywords": [],
+            "brand": None, "l1_category": None, "l2_category": None,
+            "l3_category": "防电弧手套", "l4_category": None, "attribute_gaps": [],
+            "inferred_need": "防电弧手套",
+        }
+
+    monkeypatch.setattr(cs, "parse_intent", fake_parse_intent)
+    monkeypatch.setattr(cs, "_parsed_slot_clarification", lambda parsed: None)
+
+    slot_calls = []
+
+    def fake_slot(parsed, structure):
+        slot_calls.append(1)
+        return {"summary": "x", "known": [], "missing": [{"key": "quantity", "question": "数量?", "options": []}]}
+
+    monkeypatch.setattr(cs, "_comparison_slot_clarification", fake_slot)
+
+    # 默认:执行 slot 检查 → 返回 slotClarification(会追问)
+    r1 = await cs.build_comparison_structure("防电弧手套")
+    assert r1.slotClarification is not None
+    assert len(slot_calls) == 1
+
+    # skip:跳过 slot 检查 → 不再返回 slotClarification
+    r2 = await cs.build_comparison_structure("防电弧手套", skip_clarification=True)
+    assert r2.slotClarification is None
+    assert len(slot_calls) == 1  # 没有再次调用 slot 检查

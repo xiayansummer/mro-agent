@@ -79,9 +79,11 @@ export async function sendMessage(
   callbacks: SSECallbacks,
   signal?: AbortSignal,
   imageBase64?: string,
+  skipClarification?: boolean,
 ): Promise<void> {
-  const body: Record<string, string> = { session_id: sessionId, message };
+  const body: Record<string, unknown> = { session_id: sessionId, message };
   if (imageBase64) body.image_base64 = imageBase64;
+  if (skipClarification) body.skip_clarification = true;
 
   const response = await fetch(`${API_BASE}/chat`, {
     method: "POST",

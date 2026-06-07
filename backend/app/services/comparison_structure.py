@@ -28,6 +28,7 @@ async def build_comparison_structure(
     conversation_context: list[dict] | None = None,
     memory_context: str = "",
     image_base64: str = "",
+    skip_clarification: bool = False,
 ) -> ComparisonStructureResult:
     parsed = await parse_intent(
         user_message,
@@ -44,22 +45,26 @@ async def build_comparison_structure(
         )
 
     structure = _structure_from_intent(user_message, parsed)
-    parsed_slot = _parsed_slot_clarification(parsed)
-    if parsed_slot:
-        await _enrich_brand_only_category_options(parsed, parsed_slot)
-        return ComparisonStructureResult(
-            shouldCreateDraft=False,
-            slotClarification=parsed_slot,
-            parsedIntent=parsed,
-        )
 
-    slot_clarification = _comparison_slot_clarification(parsed, structure)
-    if slot_clarification:
-        return ComparisonStructureResult(
-            shouldCreateDraft=False,
-            slotClarification=slot_clarification,
-            parsedIntent=parsed,
-        )
+    # skip_clarification:用户点"直接检索"或已提交过 slot 卡片 → 跳过参数追问,
+    # 避免反复问未知参数;仍保留下方"完全无法识别产品"的 guidance 兜底。
+    if not skip_clarification:
+        parsed_slot = _parsed_slot_clarification(parsed)
+        if parsed_slot:
+            await _enrich_brand_only_category_options(parsed, parsed_slot)
+            return ComparisonStructureResult(
+                shouldCreateDraft=False,
+                slotClarification=parsed_slot,
+                parsedIntent=parsed,
+            )
+
+        slot_clarification = _comparison_slot_clarification(parsed, structure)
+        if slot_clarification:
+            return ComparisonStructureResult(
+                shouldCreateDraft=False,
+                slotClarification=slot_clarification,
+                parsedIntent=parsed,
+            )
 
     if structure.category.confidence < 0.35 and not structure.specification.productType:
         return ComparisonStructureResult(
