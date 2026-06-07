@@ -10,6 +10,9 @@ from app.services.normalization import text_matches_brand
 _PREF_BRAND_BONUS = 25.0
 _PREF_CATEGORY_BONUS = 10.0
 
+# 匹配度低于此分的 offer 视为"离谱结果"(连产品类型都没匹配上),不展示。可调。
+_MIN_DISPLAY_SCORE = 10.0
+
 
 def rank_external_offers(
     structure: ComparisonStructure | dict | None,
@@ -37,8 +40,10 @@ def rank_external_offers(
     if brand:
         on_brand = [offer for offer in ranked if text_matches_brand(_offer_text(offer), brand)]
         if on_brand:
-            return on_brand
-    return ranked
+            ranked = on_brand
+
+    # 滤掉匹配度过低(< _MIN_DISPLAY_SCORE)的结果:与需求相关性太差,展示反而干扰。
+    return [offer for offer in ranked if (offer.get("matchScore") or 0) >= _MIN_DISPLAY_SCORE]
 
 
 def _score_offer(structure: dict, offer: dict, index: int, preferences: dict | None = None) -> dict:

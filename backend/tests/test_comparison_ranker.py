@@ -35,9 +35,11 @@ def test_rank_external_offers_prioritizes_spec_match_over_low_price():
     ]
 
     ranked = rank_external_offers(structure, offers)
+    ids = [o["id"] for o in ranked]
 
-    assert ranked[0]["id"] == "matched"
-    assert ranked[0]["matchScore"] > ranked[1]["matchScore"]
+    # 规格匹配的保留并排第一;完全不匹配的低分(cheap-wrong, < 10)被过滤掉
+    assert ids[0] == "matched"
+    assert "cheap-wrong" not in ids
     assert any("规格匹配" in reason for reason in ranked[0]["matchReasons"])
 
 
@@ -152,3 +154,18 @@ def test_preference_none_leaves_scoring_unchanged():
     offers = [{"id": "a", "title": "美和 手拉葫芦", "priceValue": 10, "rawRank": 1}]
     ranked = rank_external_offers(structure, offers, preferences=None)
     assert not any("偏好品牌" in r for r in ranked[0]["matchReasons"])
+
+
+def test_low_match_score_offers_filtered_out():
+    """匹配度 < 10 的离谱结果(连产品类型都没匹配上)不展示。"""
+    structure = ComparisonStructure(
+        specification=ComparisonSpecification(productType="手拉葫芦"),
+    )
+    offers = [
+        {"id": "good", "title": "手拉葫芦 2吨", "priceValue": 100, "rawRank": 1},
+        {"id": "junk", "title": "螺丝刀套装", "priceValue": 5, "rawRank": 2},
+    ]
+    ranked = rank_external_offers(structure, offers)
+    ids = [o["id"] for o in ranked]
+    assert "good" in ids
+    assert "junk" not in ids  # 仅含价格(+2) < 10,被滤
