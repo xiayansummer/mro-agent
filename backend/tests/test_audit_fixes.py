@@ -305,3 +305,32 @@ def test_relative_filter_drops_low_relative_when_top_high():
     assert "top" in ids
     # weak 仅部分匹配(~17 分),远低于 top,相对过滤应滤掉(绝对阈值 10 下本会保留)
     assert "weak" not in ids, [(o["id"], o["matchScore"]) for o in ranked]
+
+
+# ── 系统 bug:_compact 大小写不统一,型号/标准等英文参数匹配失效 ──────────────
+def test_english_params_match_case_insensitively():
+    from app.models.comparison import ComparisonStructure, ComparisonSpecification
+    from app.services.comparison_ranker import rank_external_offers
+
+    structure = ComparisonStructure(
+        specification=ComparisonSpecification(
+            productType="手拉葫芦", brand="美和", model="HSZ-622A", size="2吨"
+        )
+    )
+    offers = [
+        {"id": "with_model", "title": "美和 手拉葫芦 HSZ-622A 2吨 环链", "priceValue": 268, "rawRank": 1},
+        {"id": "no_model", "title": "美和 手拉葫芦 2吨 手扳葫芦", "priceValue": 255, "rawRank": 2},
+    ]
+    ranked = rank_external_offers(structure, offers)
+    by_id = {o["id"]: o for o in ranked}
+    # 含型号的应命中型号加权 → 分更高、排第一(haystack 已小写,model token 也须小写比较)
+    assert ranked[0]["id"] == "with_model", [(o["id"], o["matchScore"]) for o in ranked]
+    assert by_id["with_model"]["matchScore"] > by_id["no_model"]["matchScore"]
+    assert any("型号匹配" in r for r in by_id["with_model"]["matchReasons"])
+
+    # standard 同样大小写不敏感
+    s2 = ComparisonStructure(
+        specification=ComparisonSpecification(productType="外六角螺栓", standard="DIN933")
+    )
+    r2 = rank_external_offers(s2, [{"id": "a", "title": "外六角螺栓 din933 m8 全牙", "priceValue": 1, "rawRank": 1}])
+    assert any("标准匹配" in r for r in r2[0]["matchReasons"]), r2[0]["matchReasons"]

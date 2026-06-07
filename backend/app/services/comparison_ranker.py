@@ -221,7 +221,9 @@ def _tokens(value: str) -> list[str]:
 
 
 def _compact(value: str) -> str:
-    return re.sub(r"\s+", "", _clean(value))
+    # 统一小写:_offer_text(haystack)已转小写,这里也必须小写,否则含大写字母的英文
+    # 参数(型号 HSZ-622A、标准 DIN933 等)子串匹配会失效。
+    return re.sub(r"\s+", "", _clean(value)).lower()
 
 
 def _clean(value: Any) -> str:
