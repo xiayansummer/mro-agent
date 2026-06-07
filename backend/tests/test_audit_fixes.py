@@ -175,3 +175,30 @@ async def test_skip_clarification_bypasses_slot_questions(monkeypatch):
     r2 = await cs.build_comparison_structure("防电弧手套", skip_clarification=True)
     assert r2.slotClarification is None
     assert len(slot_calls) == 1  # 没有再次调用 slot 检查
+
+
+@pytest.mark.asyncio
+async def test_slot_answer_message_auto_skips_even_without_flag(monkeypatch):
+    """彻底解决反复追问:消息带 slot 卡片概述文本 → 后端自动识别为 slot 回答并跳过,
+    不依赖前端 skip flag(防前端缓存/旧版导致同一参数被反复问)。"""
+    from app.services import comparison_structure as cs
+
+    async def fake_parse_intent(user_message, conversation_context=None, memory_context="", image_base64=""):
+        return {
+            "query_type": "comparison", "keywords": ["手拉葫芦"], "spec_keywords": [],
+            "brand": None, "l1_category": None, "l2_category": None,
+            "l3_category": "手拉葫芦", "l4_category": None, "attribute_gaps": [],
+            "inferred_need": "手拉葫芦",
+        }
+
+    monkeypatch.setattr(cs, "parse_intent", fake_parse_intent)
+    monkeypatch.setattr(cs, "_parsed_slot_clarification", lambda parsed: None)
+    slot_calls = []
+    monkeypatch.setattr(cs, "_comparison_slot_clarification",
+                        lambda p, s: slot_calls.append(1) or {"summary": "x", "known": [], "missing": [{"key": "quantity", "question": "数量?", "options": []}]})
+
+    # 模拟 slot 卡片提交回来的消息(带卡片概述文本),未显式传 skip_clarification=True
+    msg = "需要采购手拉葫芦，请先确认关键参数后再查询京东工业品和震坤行。 商品类型手拉葫芦 按平台起订量"
+    r = await cs.build_comparison_structure(msg)
+    assert r.slotClarification is None  # 自动跳过,不再追问
+    assert len(slot_calls) == 0

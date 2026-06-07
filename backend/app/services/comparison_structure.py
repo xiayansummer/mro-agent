@@ -23,6 +23,15 @@ class ComparisonStructureResult(BaseModel):
     parsedIntent: dict = Field(default_factory=dict)
 
 
+_SLOT_ANSWER_MARKERS = ("请先确认关键参数后再查询", "请先通过上方卡片确认")
+
+
+def _looks_like_slot_answer(user_message: str) -> bool:
+    """slot 卡片提交回来的消息会带卡片概述/提示文本,据此识别为 slot 回答。"""
+    text = user_message or ""
+    return any(marker in text for marker in _SLOT_ANSWER_MARKERS)
+
+
 async def build_comparison_structure(
     user_message: str,
     conversation_context: list[dict] | None = None,
@@ -30,6 +39,11 @@ async def build_comparison_structure(
     image_base64: str = "",
     skip_clarification: bool = False,
 ) -> ComparisonStructureResult:
+    # 兜底:消息带 slot 卡片概述文本 → 识别"用户在回答 slot"并跳过追问,不依赖前端
+    # skip flag(防前端缓存/旧版不发 flag 时反复问同一参数)。
+    if not skip_clarification and _looks_like_slot_answer(user_message):
+        skip_clarification = True
+
     parsed = await parse_intent(
         user_message,
         conversation_context=conversation_context,
