@@ -202,3 +202,24 @@ async def test_slot_answer_message_auto_skips_even_without_flag(monkeypatch):
     r = await cs.build_comparison_structure(msg)
     assert r.slotClarification is None  # 自动跳过,不再追问
     assert len(slot_calls) == 0
+
+
+# ── 搜索词去型号:厂家内部型号(HSZ-622A)京东标题常不含,带上搜不到;交 ranker 打分 ──
+def test_search_terms_exclude_model_for_recall():
+    from app.models.comparison import (
+        ComparisonStructure, ComparisonSpecification, ComparisonCategory,
+    )
+    from app.services.comparison_query_builder import build_search_terms
+
+    structure = ComparisonStructure(
+        category=ComparisonCategory(l3="手拉葫芦"),
+        specification=ComparisonSpecification(
+            productType="手拉葫芦", brand="美和", model="HSZ-622A", size="1吨",
+        ),
+    )
+    terms = build_search_terms(structure)
+    # 没有任何 jd/zkh 搜索词带型号
+    assert all("HSZ-622A" not in t for t in terms.jd), terms.jd
+    assert all("HSZ-622A" not in t for t in terms.zkh), terms.zkh
+    # 但保留"品牌+品类(+规格)"这种平台能搜到的有效词
+    assert any("美和" in t and "手拉葫芦" in t for t in terms.jd)
