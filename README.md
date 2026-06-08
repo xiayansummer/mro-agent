@@ -14,6 +14,7 @@
 - **用户偏好记忆**：通过 Memos 保存会话摘要、SKU 反馈、ERP 导入偏好，并在后续搜索中影响排序和追问。
 - **批量询价**：上传 `.xlsx` / `.xls` / `.csv` 询价表，批量匹配 SKU；支持下载询价模板。
 - **图片/视觉输入**：聊天请求支持 `image_base64`，用于带图片的需求理解。
+- **外部比价（Chrome 扩展）**：通过浏览器扩展用用户已登录的京东工业品 / 震坤行账号采集真实搜索结果页做比价，结果回传到对话卡片归一排序（安装与绑定见下文「Chrome 扩展」）。
 
 ## 技术架构
 
@@ -141,10 +142,11 @@ DB_PASSWORD=your_password
 DB_NAME=mro_agent_dev
 
 # AI API (OpenAI-compatible)
+# qwen3.6-plus 为多模态模型，文本与图片可共用同一模型，AI_MODEL 与 AI_VISION_MODEL 可填同一个
 AI_API_KEY=your_api_key
 AI_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
-AI_MODEL=qwen-plus
-AI_VISION_MODEL=qwen-vl-plus
+AI_MODEL=qwen3.6-plus
+AI_VISION_MODEL=qwen3.6-plus
 
 # Memos memory service
 MEMOS_URL=http://localhost:5230
@@ -160,7 +162,7 @@ REGISTER_TOKEN=
 
 | 服务 | `AI_BASE_URL` | `AI_MODEL` |
 |---|---|---|
-| 通义千问 | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen-plus` |
+| 通义千问（多模态，推荐） | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen3.6-plus` |
 | OpenAI | `https://api.openai.com/v1` | `gpt-4o` |
 | Anthropic-compatible proxy | 代理地址 | 代理支持的模型名 |
 
@@ -304,7 +306,24 @@ SSE 事件：
 | `GET` | `/api/extension/status` | Web 查询当前 active 扩展状态 |
 | `POST` | `/api/extension/status` | 扩展上报心跳、版本、设备名和平台登录态 |
 
-Chrome 扩展源码位于 `extension/chrome`，本地通过 `chrome://extensions/` 加载 unpacked 目录。
+Chrome 扩展源码位于 `extension/chrome`（Manifest V3），完整说明见 `extension/chrome/README.md`。
+
+**安装（加载 unpacked）**
+
+1. 打开 `chrome://extensions/`，开启右上角「开发者模式」
+2. 点「加载已解压的扩展程序」，选择 `extension/chrome` 目录
+3. 安装后建议把扩展固定到工具栏
+
+扩展后端地址固定为 `https://mro.fultek.ai/api`（见 `src/config.js` 的 `DEFAULT_API_BASE`），无需手动填写。
+
+**绑定（配对码）**
+
+1. 浏览器登录 `https://mro.fultek.ai`
+2. 在对话发起一次比价，比价卡片里点「生成配对码」（`POST /api/extension/pairing-code`，返回 6 位数字码，有效期 5 分钟）
+3. 打开扩展 popup，输入配对码完成绑定（`POST /api/extension/register` 换取 `extToken`）
+4. 绑定后扩展每 1 分钟上报心跳并领取 JD / 震坤行比价子任务；后端只保存 `extToken` 的 SHA-256 hash，新绑定会撤销旧的 active 扩展
+
+**隐私边界**：扩展不读取/上传 cookie、不上传 localStorage、不上传 HTML 原文，只回传解析后的结构化比价条目。
 
 ## AI 处理流程
 

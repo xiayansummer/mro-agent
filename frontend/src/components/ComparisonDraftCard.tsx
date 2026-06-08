@@ -150,7 +150,7 @@ export default function ComparisonDraftCard({ draft, disabled, onStart }: Props)
               )}
             </div>
             <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 6 }}>
-              扩展 popup 后端地址默认填 http://localhost:8000/api，输入配对码即可绑定。
+              打开扩展 popup，输入上面的 6 位配对码即可绑定（后端地址已内置，无需填写）。
             </div>
             {error && <div style={{ fontSize: 12, color: "#b91c1c", marginTop: 6 }}>{error}</div>}
           </section>
