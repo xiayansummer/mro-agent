@@ -1,5 +1,5 @@
 export const DEFAULT_API_BASE = "https://mro.fultek.ai/api";
-export const EXTENSION_VERSION = "0.2.0";
+export const EXTENSION_VERSION = "0.2.1";
 export const HEARTBEAT_ALARM = "mro-extension-heartbeat";
 export const HEARTBEAT_PERIOD_MINUTES = 1;
 // 登录态探测最小间隔:心跳每分钟一次,但"探测登录态"要真打开京东/震坤行页面,

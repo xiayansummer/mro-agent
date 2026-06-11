@@ -28,7 +28,8 @@ export function parseZkhSearchPage(limit) {
     const title = extractTitle(card, text);
     if (!title || !link) continue;
 
-    const id = `zkh-${hashString(link)}-${offers.length + 1}`;
+    // 同 jdParser:id 只由链接 hash 决定,跨任务稳定,保证"不合适"抑制可靠。
+    const id = `zkh-${hashString(link)}`;
     if (seen.has(link) || seen.has(title)) continue;
     seen.add(link);
     seen.add(title);

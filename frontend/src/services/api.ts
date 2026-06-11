@@ -39,9 +39,11 @@ export async function submitExternalOfferFeedback(
   sessionId: string,
   action: "liked" | "disliked",
   offer: ExternalOffer,
-): Promise<void> {
+): Promise<boolean> {
+  // 返回成败:调用方据此决定乐观移除是否回滚。若静默吞错,
+  // "不合适"看着移除了但 Memos 没记录,下次比价又复现。
   try {
-    await fetch(`${API_BASE}/feedback`, {
+    const response = await fetch(`${API_BASE}/feedback`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeader() },
       body: JSON.stringify({
@@ -55,8 +57,9 @@ export async function submitExternalOfferFeedback(
         specification: offer.specText ?? "",
       }),
     });
+    return response.ok;
   } catch {
-    // fire-and-forget, silent fail
+    return false;
   }
 }
 

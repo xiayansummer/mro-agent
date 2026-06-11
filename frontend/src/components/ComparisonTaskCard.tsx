@@ -203,6 +203,13 @@ function ComparisonTable({ offers, sessionId }: { offers: ExternalOffer[]; sessi
               onDismiss={() =>
                 setDismissed((prev) => new Set(prev).add(offerKey(offer)))
               }
+              onRestore={() =>
+                setDismissed((prev) => {
+                  const next = new Set(prev);
+                  next.delete(offerKey(offer));
+                  return next;
+                })
+              }
             />
           ))}
         </tbody>
@@ -219,18 +226,26 @@ function OfferRow({
   offer,
   sessionId,
   onDismiss,
+  onRestore,
 }: {
   offer: ExternalOffer;
   sessionId?: string;
   onDismiss?: () => void;
+  onRestore?: () => void;
 }) {
   const [vote, setVote] = useState<"liked" | "disliked" | null>(null);
 
-  const handleVote = (action: "liked" | "disliked") => {
+  const handleVote = async (action: "liked" | "disliked") => {
     setVote(action);
-    if (sessionId) submitExternalOfferFeedback(sessionId, action, offer);
-    // 标记不合适即从当前列表移除(后端会在后续比价按 SKU 一并剔除)。
+    // 标记不合适即从当前列表乐观移除(后端会在后续比价/回放按 SKU 一并剔除)。
     if (action === "disliked") onDismiss?.();
+    if (!sessionId) return;
+    const ok = await submitExternalOfferFeedback(sessionId, action, offer);
+    if (!ok) {
+      // 反馈没存上:回滚乐观移除并恢复按钮,避免"看着删了、下次又出现"。
+      setVote(null);
+      if (action === "disliked") onRestore?.();
+    }
   };
 
   return (

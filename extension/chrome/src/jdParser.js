@@ -23,7 +23,10 @@ export function parseJdSearchPage(limit) {
     const title = extractTitle(card, text);
     if (!title || !link) continue;
 
-    const id = `jd-${hashString(link)}-${offers.length + 1}`;
+    // id 只由商品链接 hash 决定,跨任务稳定 —— "标记不合适"按 platformSku/id 抑制,
+    // 若 id 掺位置序号,同一商品下次换了排位 id 就变、抑制失效。
+    // 列表内唯一性由下方 seen(link) 去重保证,无需位置后缀。
+    const id = `jd-${hashString(link)}`;
     if (seen.has(link) || seen.has(title)) continue;
     seen.add(link);
     seen.add(title);
