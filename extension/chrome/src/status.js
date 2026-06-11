@@ -2,9 +2,9 @@ import { reportStatus } from "./api.js";
 import { getSettings } from "./config.js";
 import { collectLoginStatus } from "./loginProbe.js";
 
-export async function collectPlatformStatus() {
+export async function collectPlatformStatus(force = false) {
   try {
-    return await collectLoginStatus();
+    return await collectLoginStatus(force);
   } catch (error) {
     const checkedAt = new Date().toISOString();
     return [
@@ -16,7 +16,9 @@ export async function collectPlatformStatus() {
 
 let heartbeatInFlight = false;
 
-export async function sendHeartbeat() {
+// force=true:绕过登录态探测的 TTL 缓存、强制即时探测一次(手动「立即上报状态」用)。
+// force=false(默认,定时心跳):走 TTL 缓存,避免每分钟真打开平台页触发风控。
+export async function sendHeartbeat(force = false) {
   const settings = await getSettings();
   if (!settings.extToken) {
     return { skipped: true, reason: "not_bound" };
@@ -29,7 +31,7 @@ export async function sendHeartbeat() {
   try {
     await reportStatus(settings.apiBase, settings.extToken, {
       deviceName: settings.deviceName,
-      platforms: await collectPlatformStatus(),
+      platforms: await collectPlatformStatus(force),
     });
 
     const lastHeartbeatAt = new Date().toISOString();

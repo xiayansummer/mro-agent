@@ -4,7 +4,7 @@ import {
   getSettings,
 } from "./config.js";
 import { sendHeartbeat } from "./status.js";
-import { openPlatformLogin } from "./loginProbe.js";
+import { openPlatformLogin, recordPlatformLoginFromTask } from "./loginProbe.js";
 import {
   fetchNextTask,
   submitSubtaskResults,
@@ -36,7 +36,8 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === "MRO_SEND_HEARTBEAT") {
-    sendHeartbeat()
+    // 手动「立即上报状态」:强制即时探测一次登录态(绕过 TTL 缓存)。
+    sendHeartbeat(true)
       .then((result) => {
         // 心跳成功立即反馈;任务轮询失败不应污染"心跳成功"的结果 —— 否则
         // popup 会误显示"状态上报失败",诱使用户无谓重新绑定。
@@ -100,6 +101,13 @@ async function pollAndRunNextTask() {
       const result = await runner(task);
       // 由纯函数 decideSubtaskOutcome 决定落库状态:done / login_required / failed。
       const outcome = decideSubtaskOutcome(result);
+      // 用真实搜索结果回写登录态缓存:done=已登录、login_required=未登录/验证拦截。
+      // 活跃使用期间靠这个保持登录态新鲜,定时心跳就无需再主动探测平台页(降风控)。
+      if (outcome.status === "done") {
+        await recordPlatformLoginFromTask(task.platform, true).catch(() => {});
+      } else if (outcome.status === "login_required") {
+        await recordPlatformLoginFromTask(task.platform, false, outcome.message).catch(() => {});
+      }
       if (outcome.status !== "done") {
         await updateSubtaskStatus(
           settings.apiBase,

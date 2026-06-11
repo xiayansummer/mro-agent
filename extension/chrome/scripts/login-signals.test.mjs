@@ -1,7 +1,23 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { interpretLoginSignals } from "../src/loginProbe.js";
+import { interpretLoginSignals, isCacheFresh } from "../src/loginProbe.js";
+
+const TTL = 30 * 60 * 1000; // 与 LOGIN_PROBE_TTL_MINUTES 对齐
+
+test("登录态缓存:TTL 内视为新鲜 → 心跳复用、不再打开平台页(避免风控)", () => {
+  const now = 1_000_000_000_000;
+  assert.equal(isCacheFresh(now - 60 * 1000, now, TTL), true); // 1 分钟前探的,仍新鲜
+});
+
+test("登录态缓存:超过 TTL → 需重新探测", () => {
+  const now = 1_000_000_000_000;
+  assert.equal(isCacheFresh(now - 31 * 60 * 1000, now, TTL), false); // 31 分钟前,过期
+});
+
+test("登录态缓存:无时间戳(从未探过)→ 不新鲜,需探测", () => {
+  assert.equal(isCacheFresh(undefined, 1_000_000_000_000, TTL), false);
+});
 
 test("明确已登录特征 → loggedIn true", () => {
   assert.deepEqual(
