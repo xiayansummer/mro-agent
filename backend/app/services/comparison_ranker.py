@@ -24,6 +24,20 @@ def rank_external_offers(
     if not offers:
         return []
 
+    # 用户标记过"不合适"的 offer 直接剔除(按平台 SKU / id 匹配)。否则每次重新比价
+    # 都会把同一条无关结果(如搜"美和 葫芦"误中的项链)重新抓回来、重复展示。
+    # disliked_skus 由 memory_service.get_preference_signals 从 #feedback #disliked 取出。
+    disliked = {s for s in ((preferences or {}).get("disliked_skus") or []) if s}
+    if disliked:
+        offers = [
+            offer
+            for offer in offers
+            if _clean(offer.get("platformSku")) not in disliked
+            and _clean(offer.get("id")) not in disliked
+        ]
+        if not offers:
+            return []
+
     normalized_structure = _structure_dict(structure)
     scored = [_score_offer(normalized_structure, offer, index, preferences) for index, offer in enumerate(offers)]
     ranked = sorted(

@@ -13,6 +13,7 @@ Memo tagging convention:
 
 import asyncio
 import logging
+import re
 from typing import Optional
 
 import httpx
@@ -338,14 +339,16 @@ class MemoryService:
             logger.error(f"Memos: update_preference_memo failed: {e}", exc_info=True)
 
     async def get_preference_signals(self, user_id: str) -> dict:
-        """提取结构化用户偏好(品牌/品类),供 comparison_ranker 排序硬加权(DPO)用。
-        读最新 #preference memo,解析'偏好品牌：'/'常用品类：'行;失败返回空。"""
+        """提取结构化用户偏好,供 comparison_ranker 用:
+        - brands/categories:从最新 #preference memo 解析(DPO 排序硬加权)
+        - disliked_skus:从 #feedback #disliked memo 取被标记不合适的平台 SKU(比价时剔除)
+        各自独立 try,任一失败不影响另一项。"""
         uid_tag = _uid_tag(user_id)
         try:
             memos = await self.list_memos(uid_tag, extra_tag="preference", limit=3)
         except Exception as e:
             logger.warning(f"Memos: get_preference_signals failed: {e}")
-            return {"brands": [], "categories": []}
+            memos = []
 
         def _parse(value: str) -> list[str]:
             for sep in ("、", "，"):
@@ -363,7 +366,27 @@ class MemoryService:
         return {
             "brands": list(dict.fromkeys(brands)),
             "categories": list(dict.fromkeys(categories)),
+            "disliked_skus": await self._get_disliked_offer_skus(uid_tag),
         }
+
+    async def _get_disliked_offer_skus(self, uid_tag: str, limit: int = 200) -> list[str]:
+        """读 #feedback #disliked memo,提取被标记"不合适"的商品编码(平台 SKU),
+        供 comparison_ranker 在比价时剔除。失败返回空、不阻塞排序。"""
+        try:
+            memos = await self.list_memos(uid_tag, extra_tag="disliked", limit=limit)
+        except Exception as e:
+            logger.warning(f"Memos: _get_disliked_offer_skus failed: {e}")
+            return []
+        skus: list[str] = []
+        for memo in memos:
+            for line in (memo.get("content") or "").splitlines():
+                # 反馈 memo 里编码行形如:**编码：** `平台SKU`
+                if line.startswith("**编码：**"):
+                    match = re.search(r"`([^`]+)`", line)
+                    if match:
+                        skus.append(match.group(1).strip())
+                    break
+        return list(dict.fromkeys(skus))
 
     async def _delete_memo(self, memo_name: str) -> None:
         """删除指定 memo（按 name 字段，格式为 'memos/xxx'）。"""

@@ -169,3 +169,62 @@ def test_low_match_score_offers_filtered_out():
     ids = [o["id"] for o in ranked]
     assert "good" in ids
     assert "junk" not in ids  # 仅含价格(+2) < 10,被滤
+
+
+def test_rank_excludes_disliked_skus():
+    """用户标记"不合适"的 offer(按平台 SKU)应被剔除,不再出现在后续比价里。
+    复现:搜"美和 葫芦"误中的玉项链被标记后,下次比价不应再抓回来重复展示。"""
+    structure = ComparisonStructure(
+        specification=ComparisonSpecification(productType="手拉葫芦", brand="美和"),
+    )
+    offers = [
+        {
+            "id": "necklace",
+            "platformSku": "10223718206032",
+            "title": "玉美和葫芦项链 轻奢时尚百搭设计锁骨新款",
+            "priceValue": 159,
+            "rawRank": 1,
+        },
+        {
+            "id": "hoist",
+            "platformSku": "100351117472",
+            "title": "美和TOHO 手拉葫芦 1吨1.5米",
+            "priceValue": 542,
+            "rawRank": 2,
+        },
+    ]
+    ranked = rank_external_offers(
+        structure, offers, preferences={"disliked_skus": ["10223718206032"]}
+    )
+    skus = [o.get("platformSku") for o in ranked]
+    assert "10223718206032" not in skus  # 被标记不合适的项链已剔除
+    assert "100351117472" in skus  # 正常结果保留
+
+
+def test_rank_disliked_matches_by_id_when_no_platform_sku():
+    """无 platformSku 的 offer 用 id 兜底匹配 disliked(前端 item_code = platformSku || id)。"""
+    structure = ComparisonStructure(
+        specification=ComparisonSpecification(productType="手拉葫芦", brand="美和"),
+    )
+    offers = [
+        {"id": "junk-offer", "title": "美和 葫芦摆件", "priceValue": 30, "rawRank": 1},
+        {"id": "real", "title": "美和 手拉葫芦 2吨", "priceValue": 300, "rawRank": 2},
+    ]
+    ranked = rank_external_offers(
+        structure, offers, preferences={"disliked_skus": ["junk-offer"]}
+    )
+    ids = [o["id"] for o in ranked]
+    assert "junk-offer" not in ids
+    assert "real" in ids
+
+
+def test_rank_empty_disliked_is_noop():
+    """无 disliked_skus 时排序行为不变(回归保护)。"""
+    structure = ComparisonStructure(
+        specification=ComparisonSpecification(productType="手拉葫芦", brand="美和"),
+    )
+    offers = [{"id": "a", "platformSku": "X", "title": "美和 手拉葫芦 1吨", "priceValue": 100, "rawRank": 1}]
+    ranked = rank_external_offers(
+        structure, offers, preferences={"brands": [], "categories": [], "disliked_skus": []}
+    )
+    assert any(o.get("platformSku") == "X" for o in ranked)

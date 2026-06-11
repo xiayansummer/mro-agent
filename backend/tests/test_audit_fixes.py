@@ -139,7 +139,28 @@ async def test_get_preference_signals_empty_when_no_memo(monkeypatch):
 
     monkeypatch.setattr(memory_service, "list_memos", fake_list_memos)
     sig = await memory_service.get_preference_signals("u1")
-    assert sig == {"brands": [], "categories": []}
+    assert sig == {"brands": [], "categories": [], "disliked_skus": []}
+
+
+@pytest.mark.asyncio
+async def test_get_preference_signals_extracts_disliked_skus(monkeypatch):
+    """#feedback #disliked memo 里的商品编码(平台 SKU)被解析进 disliked_skus,供比价剔除。"""
+    from app.services.memory_service import memory_service
+
+    disliked_memo = {
+        "content": (
+            "## 产品反馈\n\n**操作：** 👎 不符合需求\n"
+            "**产品：** 玉美和葫芦项链\n**编码：** `10223718206032`\n\n"
+            "#u_x #feedback #disliked"
+        )
+    }
+
+    async def fake_list_memos(uid_tag, extra_tag=None, limit=10):
+        return [disliked_memo] if extra_tag == "disliked" else []
+
+    monkeypatch.setattr(memory_service, "list_memos", fake_list_memos)
+    sig = await memory_service.get_preference_signals("u1")
+    assert sig["disliked_skus"] == ["10223718206032"]
 
 
 # ── 直接检索: skip_clarification 跳过参数追问,避免反复问未知参数 ─────────────

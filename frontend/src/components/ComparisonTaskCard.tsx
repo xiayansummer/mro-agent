@@ -173,6 +173,11 @@ function isJdBlockedByVerification(subtask: ComparisonSubtask) {
 }
 
 function ComparisonTable({ offers, sessionId }: { offers: ExternalOffer[]; sessionId?: string }) {
+  // 标记"不合适"的 offer 立即从当前列表移除(乐观更新);后端 ranker 也会按
+  // 该 SKU 在后续比价里剔除,两边一起保证"标了就不再反复出现"。
+  const [dismissed, setDismissed] = useState<Set<string>>(() => new Set());
+  const offerKey = (offer: ExternalOffer) => `${offer.platform}-${offer.id}`;
+  const visible = offers.filter((offer) => !dismissed.has(offerKey(offer)));
   return (
     <div style={tableWrapStyle}>
       <table style={tableStyle}>
@@ -190,8 +195,15 @@ function ComparisonTable({ offers, sessionId }: { offers: ExternalOffer[]; sessi
           </tr>
         </thead>
         <tbody>
-          {offers.map((offer) => (
-            <OfferRow key={`${offer.platform}-${offer.id}`} offer={offer} sessionId={sessionId} />
+          {visible.map((offer) => (
+            <OfferRow
+              key={offerKey(offer)}
+              offer={offer}
+              sessionId={sessionId}
+              onDismiss={() =>
+                setDismissed((prev) => new Set(prev).add(offerKey(offer)))
+              }
+            />
           ))}
         </tbody>
       </table>
@@ -203,12 +215,22 @@ function Th({ children, width }: { children: string; width?: number }) {
   return <th style={{ ...thStyle, width }}>{children}</th>;
 }
 
-function OfferRow({ offer, sessionId }: { offer: ExternalOffer; sessionId?: string }) {
+function OfferRow({
+  offer,
+  sessionId,
+  onDismiss,
+}: {
+  offer: ExternalOffer;
+  sessionId?: string;
+  onDismiss?: () => void;
+}) {
   const [vote, setVote] = useState<"liked" | "disliked" | null>(null);
 
   const handleVote = (action: "liked" | "disliked") => {
     setVote(action);
     if (sessionId) submitExternalOfferFeedback(sessionId, action, offer);
+    // 标记不合适即从当前列表移除(后端会在后续比价按 SKU 一并剔除)。
+    if (action === "disliked") onDismiss?.();
   };
 
   return (
