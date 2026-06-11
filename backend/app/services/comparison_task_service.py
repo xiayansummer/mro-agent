@@ -121,6 +121,29 @@ async def start_draft(draft_id: str, user_id: str) -> Optional[dict]:
     return await get_task(task_id, user_id)
 
 
+def filter_disliked_items(subtasks: list[dict], disliked_skus) -> list[dict]:
+    """读取路径的 disliked 过滤(纯函数,可单测)。
+
+    写入路径(rank_external_offers)只管"新比价";已落库的 items_json 在轮询 /
+    历史会话回放时由 get_task 原样返回——若不在这里过滤,用户标记"不合适"后
+    一刷新/回看历史,该 offer 又复现。匹配口径与 ranker 一致:platformSku 或 id。
+    """
+    disliked = {str(s).strip() for s in (disliked_skus or []) if s}
+    if not disliked:
+        return subtasks
+    filtered = []
+    for subtask in subtasks:
+        items = subtask.get("items") or []
+        kept = [
+            item
+            for item in items
+            if str(item.get("platformSku") or "").strip() not in disliked
+            and str(item.get("id") or "").strip() not in disliked
+        ]
+        filtered.append({**subtask, "items": kept})
+    return filtered
+
+
 async def get_task(task_id: str, user_id: str) -> Optional[dict]:
     db_user_id = _require_db_user_id(user_id)
     async with AsyncSessionLocal() as session:
@@ -161,6 +184,10 @@ async def get_task(task_id: str, user_id: str) -> Optional[dict]:
             {"task_id": task_id},
         )
         subtasks = [_row_to_subtask(row) for row in subtasks_result.fetchall()]
+
+    # 读取路径同样剔除用户标记"不合适"的 offer(带 60s 进程内缓存,轮询不打爆 Memos)。
+    disliked = await memory_service.get_disliked_skus_cached(user_id)
+    subtasks = filter_disliked_items(subtasks, disliked)
 
     return {
         "id": task[0],

@@ -28,9 +28,15 @@ _background_tasks: set = set()
 
 
 class MemoryService:
+    # disliked SKU 进程内缓存 TTL:get_task 被前端秒级轮询,每次都打 Memos 会放大
+    # 延迟与压力;新反馈写入时缓存即刻失效(见 save_feedback),保证标完立即生效。
+    DISLIKED_CACHE_TTL_SECONDS = 60
+
     def __init__(self):
         self._token: Optional[str] = None
         self._client: Optional[httpx.AsyncClient] = None
+        # user_id -> (monotonic_ts, skus)
+        self._disliked_cache: dict[str, tuple[float, list[str]]] = {}
 
     # ── Internal: HTTP client ──────────────────────────────────────────────
 
@@ -269,6 +275,10 @@ class MemoryService:
                 logger.info(f"Memos: feedback saved — memo name={result.get('name')}")
         except Exception as e:
             logger.error(f"Memos: save_feedback exception: {e}", exc_info=True)
+        finally:
+            # 新反馈写入后 disliked 缓存立即失效:确保"标记不合适"下一次轮询/比价就生效,
+            # 不等 TTL。放 finally:即使 create_memo 抛错也宁可多拉一次、不留陈旧缓存。
+            self._disliked_cache.pop(user_id, None)
 
     # ── Public: Preference memo update ────────────────────────────────────
 
@@ -366,8 +376,21 @@ class MemoryService:
         return {
             "brands": list(dict.fromkeys(brands)),
             "categories": list(dict.fromkeys(categories)),
-            "disliked_skus": await self._get_disliked_offer_skus(uid_tag),
+            "disliked_skus": await self.get_disliked_skus_cached(user_id),
         }
+
+    async def get_disliked_skus_cached(self, user_id: str) -> list[str]:
+        """带进程内 TTL 缓存的 disliked SKU 读取(get_task 轮询高频调用)。
+        save_feedback 写入新反馈时主动失效,保证"标记不合适"立即生效。"""
+        import time
+
+        now = time.monotonic()
+        hit = self._disliked_cache.get(user_id)
+        if hit and now - hit[0] < self.DISLIKED_CACHE_TTL_SECONDS:
+            return hit[1]
+        skus = await self._get_disliked_offer_skus(_uid_tag(user_id))
+        self._disliked_cache[user_id] = (now, skus)
+        return skus
 
     async def _get_disliked_offer_skus(self, uid_tag: str, limit: int = 200) -> list[str]:
         """读 #feedback #disliked memo,提取被标记"不合适"的商品编码(平台 SKU),

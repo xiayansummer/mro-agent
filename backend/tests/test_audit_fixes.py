@@ -138,6 +138,7 @@ async def test_get_preference_signals_empty_when_no_memo(monkeypatch):
         return []
 
     monkeypatch.setattr(memory_service, "list_memos", fake_list_memos)
+    memory_service._disliked_cache.clear()
     sig = await memory_service.get_preference_signals("u1")
     assert sig == {"brands": [], "categories": [], "disliked_skus": []}
 
@@ -159,6 +160,7 @@ async def test_get_preference_signals_extracts_disliked_skus(monkeypatch):
         return [disliked_memo] if extra_tag == "disliked" else []
 
     monkeypatch.setattr(memory_service, "list_memos", fake_list_memos)
+    memory_service._disliked_cache.clear()
     sig = await memory_service.get_preference_signals("u1")
     assert sig["disliked_skus"] == ["10223718206032"]
 
