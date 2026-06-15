@@ -357,3 +357,53 @@ def test_english_params_match_case_insensitively():
     )
     r2 = rank_external_offers(s2, [{"id": "a", "title": "外六角螺栓 din933 m8 全牙", "priceValue": 1, "rawRank": 1}])
     assert any("标准匹配" in r for r in r2[0]["matchReasons"]), r2[0]["matchReasons"]
+
+
+# ── 比价解析鲁棒性:LLM 偶发返回空抽取时用原始消息兜底,不误弹"请提供产品名称" ──
+def test_fallback_keyword_strips_procurement_prefix():
+    from app.services.comparison_structure import _fallback_keyword_from_message
+    assert _fallback_keyword_from_message("需要采购防尘口罩") == "防尘口罩"
+    assert _fallback_keyword_from_message("帮我找M8螺栓") == "M8螺栓"
+    assert _fallback_keyword_from_message("买O型圈") == "O型圈"
+    assert _fallback_keyword_from_message("你好") == ""
+    assert _fallback_keyword_from_message("") == ""
+    assert _fallback_keyword_from_message("买") == ""  # 单字无实义
+
+
+def test_has_procurement_object_accepts_l2_only():
+    from app.services.comparison_structure import _has_procurement_object
+    # LLM 只归到 l2 也算有产品对象(与 _product_type 用 l2 兜底保持一致)
+    assert _has_procurement_object({"query_type": "vague", "l2_category": "口罩"}) is True
+
+
+@pytest.mark.asyncio
+async def test_comparison_fallback_when_llm_returns_empty(monkeypatch):
+    """复现线上 bug:LLM 对清晰输入返回空 keywords 时,不应弹回"请提供产品名称",
+    而是用原始消息兜底建出比价结构。"""
+    from app.services import comparison_structure as cs
+
+    async def fake_parse(user_message, conversation_context=None, memory_context="", image_base64=""):
+        return {"query_type": "vague", "keywords": [], "spec_keywords": [], "brand": None,
+                "l1_category": None, "l2_category": None, "l3_category": None,
+                "l4_category": None, "attribute_gaps": []}
+
+    monkeypatch.setattr(cs, "parse_intent", fake_parse)
+    res = await cs.build_comparison_structure("需要采购防尘口罩", skip_clarification=True)
+    assert res.shouldCreateDraft is True
+    assert res.structure.specification.productType == "防尘口罩"
+
+
+@pytest.mark.asyncio
+async def test_comparison_greeting_still_bounces(monkeypatch):
+    """纯问候/无产品消息仍应弹回 guidance,不被兜底误判为产品。"""
+    from app.services import comparison_structure as cs
+
+    async def fake_parse(user_message, conversation_context=None, memory_context="", image_base64=""):
+        return {"query_type": "vague", "keywords": [], "spec_keywords": [], "brand": None,
+                "l1_category": None, "l2_category": None, "l3_category": None,
+                "l4_category": None, "attribute_gaps": []}
+
+    monkeypatch.setattr(cs, "parse_intent", fake_parse)
+    res = await cs.build_comparison_structure("你好", skip_clarification=True)
+    assert res.shouldCreateDraft is False
+    assert "请提供" in (res.guidance or "")

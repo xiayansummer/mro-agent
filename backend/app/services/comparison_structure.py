@@ -32,6 +32,41 @@ def _looks_like_slot_answer(user_message: str) -> bool:
     return any(marker in text for marker in _SLOT_ANSWER_MARKERS)
 
 
+# 采购口语前缀:LLM 对同一清晰输入约 1/3 概率返回空 keywords(实测),
+# 这时不直接弹回,而是从原始消息剥掉这些前缀兜底取产品词。
+_PROCUREMENT_PREFIXES = (
+    "需要采购", "我要采购", "想采购", "要采购", "我想采购",
+    "我要购买", "想购买", "要购买", "购买", "采购",
+    "我想买", "我要买", "想买", "要买", "买",
+    "帮我找", "帮忙找", "帮我查", "帮我看", "找一下", "查一下", "看一下",
+    "我想要", "我需要", "我要", "我想", "想要", "需要", "求购", "来个", "来点",
+)
+_GREETING_OR_EMPTY = {
+    "", "你好", "您好", "hi", "hello", "在吗", "帮助", "help",
+    "你是谁", "谢谢", "ok", "测试", "test",
+}
+
+
+def _fallback_keyword_from_message(user_message: str) -> str:
+    """LLM 解析空时的兜底:从原始消息剥掉采购口语前缀,取出可用作搜索词的产品词。
+    返回空串表示消息本身无实义(问候/单字/空),此时仍走 guidance 兜底,不误判为产品。"""
+    text = (user_message or "").strip()
+    if not text:
+        return ""
+    changed = True
+    while changed:  # 反复剥离开头的采购口语前缀,如"需要采购防尘口罩"→"防尘口罩"
+        changed = False
+        for prefix in _PROCUREMENT_PREFIXES:
+            if text.startswith(prefix) and len(text) > len(prefix):
+                text = text[len(prefix):].strip("，。、:：的 \t")
+                changed = True
+                break
+    text = text.strip("，。、!！?？ \t")
+    if text.lower() in _GREETING_OR_EMPTY or len(text) < 2:
+        return ""
+    return text.replace(" ", "")
+
+
 async def build_comparison_structure(
     user_message: str,
     conversation_context: list[dict] | None = None,
@@ -52,11 +87,18 @@ async def build_comparison_structure(
     )
 
     if not _has_procurement_object(parsed):
-        return ComparisonStructureResult(
-            shouldCreateDraft=False,
-            guidance="请提供要采购的产品名称或型号规格，例如：M8 304 外六角螺栓 30mm。",
-            parsedIntent=parsed,
-        )
+        # LLM 偶发对清晰输入也返回空抽取(实测同一"防尘口罩"约 1/3 概率 keywords 为空),
+        # 不直接弹回:用原始消息剥采购口语前缀兜底取产品词,清晰需求就不会被误弹;
+        # 批量里 LLM 抽空的行也回退到原始品名而非被丢。仅问候/空消息才走 guidance。
+        fallback = _fallback_keyword_from_message(user_message)
+        if fallback:
+            parsed["keywords"] = [fallback]
+        else:
+            return ComparisonStructureResult(
+                shouldCreateDraft=False,
+                guidance="请提供要采购的产品名称或型号规格，例如：M8 304 外六角螺栓 30mm。",
+                parsedIntent=parsed,
+            )
 
     structure = _structure_from_intent(user_message, parsed)
 
@@ -121,9 +163,12 @@ def _structure_from_intent(user_message: str, parsed: dict) -> ComparisonStructu
 
 
 def _has_procurement_object(parsed: dict) -> bool:
+    # 含 l2_category:_product_type 会用 l2 兜底取 productType,gate 也必须认 l2,
+    # 否则 LLM 只把产品归到 l2 时会被误判"无产品对象"而弹回。
     if (
         parsed.get("query_type") == "vague"
         and not parsed.get("keywords")
+        and not parsed.get("l2_category")
         and not parsed.get("l3_category")
         and not parsed.get("l4_category")
         and not parsed.get("brand")
@@ -132,6 +177,7 @@ def _has_procurement_object(parsed: dict) -> bool:
         return False
     return bool(
         parsed.get("keywords")
+        or parsed.get("l2_category")
         or parsed.get("l3_category")
         or parsed.get("l4_category")
         or parsed.get("brand")
