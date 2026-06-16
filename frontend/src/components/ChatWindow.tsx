@@ -53,7 +53,10 @@ export default function ChatWindow({ sessionId, messages, onMessagesChange, onTo
     }
   }, [messages, scrollToBottom]);
 
-  useEffect(() => { return () => abortRef.current?.abort(); }, []);
+  // 不在卸载时 abort:切换会话/页面会卸载本组件,但进行中的回答应继续写回它所属的
+  // 会话(流的生命周期属于会话,不属于当前视图)。否则切走再回来答案被截断、需重发,
+  // 且后端在客户端断开时只把半截答案落库。显式「停止」仍经 handleStop 主动 abort。
+  // 流是否进行中改由消息的 isStreaming 派生(见下方 streamingInData),重挂载也能恢复。
   // 仅在"活跃比价任务集合(id:status)"真正变化时才变,避免流式 chunk 改 content
   // 触发该 effect cleanup+重建 setInterval(原依赖 [messages] 会每个 chunk 重建)。
   const activeTaskKey = useMemo(
@@ -100,6 +103,12 @@ export default function ChatWindow({ sessionId, messages, onMessagesChange, onTo
   }, []);
 
   const displayMessages = messages.length === 0 ? [WELCOME_MESSAGE] : messages;
+
+  // 进行中状态从数据派生:切走再回来时组件会重挂载、本地 isLoading 被重置为 false,
+  // 但只要该会话仍有 isStreaming 的助手消息(后台流还在写),就应继续显示"搜索中"并
+  // 禁用输入,避免在流未结束时重复提交导致两个流互相覆盖。
+  const streamingInData = messages.some((m) => m.role === "assistant" && m.isStreaming);
+  const busy = isLoading || streamingInData;
 
   const handleStop = useCallback(() => { abortRef.current?.abort(); }, []);
 
@@ -272,7 +281,7 @@ export default function ChatWindow({ sessionId, messages, onMessagesChange, onTo
           </div>
         </div>
 
-        {isLoading && (
+        {busy && (
           <div style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--accent)", fontSize: 12 }}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ animation: "spin-slow 1s linear infinite" }}>
               <path strokeLinecap="round" d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
@@ -327,7 +336,7 @@ export default function ChatWindow({ sessionId, messages, onMessagesChange, onTo
         )}
       </div>
 
-      <ChatInput onSend={handleSend} onStop={handleStop} disabled={isLoading} isLoading={isLoading}  />
+      <ChatInput onSend={handleSend} onStop={handleStop} disabled={busy} isLoading={busy}  />
     </div>
   );
 }
