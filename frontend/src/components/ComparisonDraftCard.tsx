@@ -150,7 +150,7 @@ export default function ComparisonDraftCard({ draft, disabled, onStart }: Props)
               )}
             </div>
             <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 6 }}>
-              打开扩展 popup，输入上面的 6 位配对码即可绑定（后端地址已内置，无需填写）。
+              点工具栏上的插件图标，在弹出的插件面板里输入上面的 6 位配对码即可绑定（后端地址已内置，无需填写）。
             </div>
             {error && <div style={{ fontSize: 12, color: "#b91c1c", marginTop: 6 }}>{error}</div>}
           </section>
