@@ -553,6 +553,40 @@ async def test_retry_subtask_requeues_failed_platform():
     assert FakeSession.tasks["task-1"]["completed_at"] is None
 
 
+@pytest.mark.asyncio
+async def test_get_latest_session_offers_flattens_items(monkeypatch):
+    class S:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def execute(self, statement, params):
+            assert "chat_session_id" in str(statement)
+            return FakeResult(("task-1",))
+    monkeypatch.setattr(comparison_task_service, "AsyncSessionLocal", S)
+    monkeypatch.setattr(comparison_task_service, "_require_db_user_id", lambda u: 7)
+
+    async def fake_get_task(task_id, user_id):
+        assert task_id == "task-1"
+        return {"id": "task-1", "subtasks": [
+            {"platform": "jd",  "items": [{"id": "a", "priceValue": 1}]},
+            {"platform": "zkh", "items": [{"id": "b", "priceValue": 2}]},
+        ]}
+    monkeypatch.setattr(comparison_task_service, "get_task", fake_get_task)
+
+    offers = await comparison_task_service.get_latest_session_offers("sess-1", "u7")
+    assert [o["id"] for o in offers] == ["a", "b"]
+
+
+@pytest.mark.asyncio
+async def test_get_latest_session_offers_none_when_no_task(monkeypatch):
+    class S:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def execute(self, statement, params): return FakeResult(None)
+    monkeypatch.setattr(comparison_task_service, "AsyncSessionLocal", S)
+    monkeypatch.setattr(comparison_task_service, "_require_db_user_id", lambda u: 7)
+    assert await comparison_task_service.get_latest_session_offers("sess-x", "u7") is None
+
+
 def _seed_running_subtask():
     FakeSession.tasks["task-1"] = {
         "id": "task-1",

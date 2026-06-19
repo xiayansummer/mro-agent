@@ -220,6 +220,35 @@ async def get_latest_task_for_draft(draft_id: str, user_id: str) -> Optional[dic
     return await get_task(row[0], user_id)
 
 
+async def get_latest_session_offers(session_id: str, user_id: str) -> Optional[list[dict]]:
+    """本会话最近一个比价 task 的全部 offers(跨平台拍平),无 task/无 offers → None。
+
+    精炼指令的操作对象:不重新抓取,直接复用已采集结果(含 disliked 过滤,在 get_task 内)。
+    """
+    db_user_id = _require_db_user_id(user_id)
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text(
+                """
+                SELECT t.id FROM comparison_tasks t
+                JOIN comparison_drafts d ON t.draft_id = d.id
+                WHERE d.chat_session_id = :sid AND t.user_id = :uid
+                ORDER BY t.created_at DESC, t.id DESC
+                LIMIT 1
+                """
+            ),
+            {"sid": session_id, "uid": db_user_id},
+        )
+        row = result.fetchone()
+    if not row:
+        return None
+    task = await get_task(row[0], user_id)
+    if not task:
+        return None
+    offers = [item for st in task.get("subtasks", []) for item in (st.get("items") or [])]
+    return offers or None
+
+
 async def retry_subtask(task_id: str, platform: str, user_id: str) -> Optional[dict]:
     db_user_id = _require_db_user_id(user_id)
     async with AsyncSessionLocal() as session:
