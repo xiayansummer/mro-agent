@@ -185,3 +185,47 @@ async def test_update_draft_regenerates_search_terms_and_platforms():
     assert updated["structure"]["searchTerms"]["jd"][0] == "O型圈 30×3.1mm"
     assert updated["selectedPlatforms"] == ["jd", "zkh"]
     assert json.loads(FakeSession.last_update["search_terms_json"])["zkh"][0] == "O型圈 30×3.1mm"
+
+
+@pytest.mark.asyncio
+async def test_create_draft_empty_preferred_platforms_falls_back_to_jd_zkh_ehsy():
+    """当 preferredPlatforms 为空列表时，create_draft 应兜底为 ["jd", "zkh", "ehsy"]（含西域）。"""
+    structure = ComparisonStructure(
+        category=ComparisonCategory(l3="轴承"),
+        specification=ComparisonSpecification(productType="深沟球轴承", size="6205"),
+        purchaseConstraints=PurchaseConstraints(preferredPlatforms=[]),
+    )
+
+    draft = await comparison_draft_service.create_draft(
+        user_id="u7",
+        session_id="s1",
+        raw_query="6205 深沟球轴承",
+        structure=structure,
+    )
+
+    inserted = FakeSession.last_insert
+    assert json.loads(inserted["selected_platforms"]) == ["jd", "zkh", "ehsy"]
+    assert draft["selectedPlatforms"] == ["jd", "zkh", "ehsy"]
+
+
+@pytest.mark.asyncio
+async def test_update_draft_empty_preferred_platforms_falls_back_to_jd_zkh_ehsy():
+    """当 update_draft_structure 的 selected_platforms=None 且 preferredPlatforms 为空时，
+    应兜底为 ["jd", "zkh", "ehsy"]（含西域）。"""
+    created = await comparison_draft_service.create_draft("u7", "s1", "query", _structure())
+
+    updated_structure = ComparisonStructure(
+        category=ComparisonCategory(l3="轴承"),
+        specification=ComparisonSpecification(productType="深沟球轴承", size="6205"),
+        purchaseConstraints=PurchaseConstraints(preferredPlatforms=[]),
+    )
+
+    updated = await comparison_draft_service.update_draft_structure(
+        draft_id=created["id"],
+        user_id="u7",
+        structure=updated_structure,
+        selected_platforms=None,
+    )
+
+    assert json.loads(FakeSession.last_update["selected_platforms"]) == ["jd", "zkh", "ehsy"]
+    assert updated["selectedPlatforms"] == ["jd", "zkh", "ehsy"]
