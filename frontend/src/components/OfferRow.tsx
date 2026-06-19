@@ -22,6 +22,8 @@ export default function OfferRow({ offer, sessionId, onDismiss, onRestore }: Pro
   const [vote, setVote] = useState<"liked" | "disliked" | null>(null);
   // Self-contained dismissed state for standalone use (when parent passes no onDismiss)
   const [selfDismissed, setSelfDismissed] = useState(false);
+  // 跨平台 offer 字段并非都齐全(西域等来源可能缺 matchReasons),渲染前兜底成空数组
+  const reasons = offer.matchReasons ?? [];
 
   const handleVote = async (action: "liked" | "disliked") => {
     setVote(action);
@@ -91,7 +93,7 @@ export default function OfferRow({ offer, sessionId, onDismiss, onRestore }: Pro
       </td>
       <td style={tdStyle}>
         <div style={reasonStyle}>
-          {offer.matchReasons.length > 0 ? offer.matchReasons.slice(0, 3).join("；") : "按搜索相关性保留"}
+          {reasons.length > 0 ? reasons.slice(0, 3).join("；") : "按搜索相关性保留"}
         </div>
       </td>
     </tr>

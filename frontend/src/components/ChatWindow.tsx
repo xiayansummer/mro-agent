@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { ChatMessage, ComparisonPlatform } from "../types";
 import { getComparisonTask, retryComparisonPlatform, sendMessage, startComparisonDraft } from "../services/api";
 import MessageBubble from "./MessageBubble";
+import ErrorBoundary from "./ErrorBoundary";
 import ChatInput from "./ChatInput";
 
 function generateId() {
@@ -306,17 +307,18 @@ export default function ChatWindow({ sessionId, messages, onMessagesChange, onTo
       >
         <div style={{ maxWidth: 780, margin: "0 auto" }}>
           {displayMessages.map((msg, i) => (
-            <MessageBubble
-              key={msg.id}
-              message={msg}
-              isFirst={i === 0}
-              sessionId={sessionId}
-              onChipSubmit={(text) => handleSend(text, undefined, undefined, true)}
-              onComparisonStart={handleComparisonStart}
-              onComparisonRefresh={handleComparisonRefresh}
-              onComparisonRetry={handleComparisonRetry}
-              onNewComparison={onNewChat}
-            />
+            <ErrorBoundary key={msg.id} label={`message ${msg.id}`}>
+              <MessageBubble
+                message={msg}
+                isFirst={i === 0}
+                sessionId={sessionId}
+                onChipSubmit={(text) => handleSend(text, undefined, undefined, true)}
+                onComparisonStart={handleComparisonStart}
+                onComparisonRefresh={handleComparisonRefresh}
+                onComparisonRetry={handleComparisonRetry}
+                onNewComparison={onNewChat}
+              />
+            </ErrorBoundary>
           ))}
           <div ref={bottomRef} />
         </div>

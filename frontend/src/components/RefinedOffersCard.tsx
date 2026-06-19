@@ -5,9 +5,11 @@ import { ChatMessage } from "../types";
 type R = NonNullable<ChatMessage["refinedOffers"]>;
 
 export default function RefinedOffersCard({ data, sessionId }: { data: R; sessionId?: string }) {
+  // offers 兜底成空数组:即便上游 payload 形状异常也不会让本卡片(进而整页)崩溃
+  const offers = data.offers ?? [];
   return (
     <div style={wrapStyle}>
-      <div style={headerStyle}>{data.operationLabel}（{data.offers.length} 条）</div>
+      <div style={headerStyle}>{data.operationLabel}（{offers.length} 条）</div>
       <div style={tableWrapStyle}>
         <table style={tableStyle}>
           <thead>
@@ -24,7 +26,7 @@ export default function RefinedOffersCard({ data, sessionId }: { data: R; sessio
             </tr>
           </thead>
           <tbody>
-            {data.offers.map((o) => (
+            {offers.map((o) => (
               <OfferRow key={o.id} offer={o} sessionId={sessionId} />
             ))}
           </tbody>
