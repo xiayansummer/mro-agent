@@ -7,6 +7,8 @@ parse_refinement / apply_refinement 都是纯函数,无 IO,便于单测。
 import re
 from typing import Optional
 
+from app.services.comparison_ranker import text_matches_brand
+
 _CN_NUM = {"一": 1, "两": 2, "二": 2, "三": 3, "四": 4, "五": 5,
            "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
 
@@ -41,33 +43,59 @@ def _to_float(tok: str) -> Optional[float]:
         return float(n) if n is not None else None
 
 
-def _fmt_price(v: float) -> str:
-    """将价格格式化为字符串:整数值去掉 .0(如 50.0 → '50'),否则保留小数。"""
-    return str(int(v)) if v == int(v) else str(v)
+_PLAT_CN = {"jd": "京东工业品", "zkh": "震坤行"}
+
+
+def _brand_text(offer: dict) -> str:
+    return f"{offer.get('title') or ''} {offer.get('brand') or ''}"
+
+
+def apply_refinement(offers: list[dict], cmd: dict) -> list[dict]:
+    """在已采集 offers 上执行精炼操作:过滤 → 排序 → 取前N,纯函数无 IO。"""
+    out = list(offers)
+    if cmd.get("platform"):
+        out = [o for o in out if o.get("platform") == cmd["platform"]]
+    if cmd.get("brandKeep"):
+        out = [o for o in out if text_matches_brand(_brand_text(o), cmd["brandKeep"])]
+    if cmd.get("brandDrop"):
+        out = [o for o in out if not text_matches_brand(_brand_text(o), cmd["brandDrop"])]
+    if cmd.get("priceMax") is not None:
+        out = [o for o in out if o.get("priceValue") is not None and o["priceValue"] <= cmd["priceMax"]]
+    if cmd.get("priceMin") is not None:
+        out = [o for o in out if o.get("priceValue") is not None and o["priceValue"] >= cmd["priceMin"]]
+    if cmd.get("sort") in ("asc", "desc"):
+        # 无价(None)统一排末尾;asc 升序、desc 降序
+        big = float("inf")
+        out.sort(key=lambda o: (o.get("priceValue") is None,
+                                (o.get("priceValue") if o.get("priceValue") is not None else big)
+                                * (1 if cmd["sort"] == "asc" else -1)))
+    if cmd.get("limit"):
+        out = out[: cmd["limit"]]
+    return out
 
 
 def build_label(cmd: dict) -> str:
-    """从 cmd 生成人可读的操作标签。Task 2 会替换为更完整实现。"""
+    """从 cmd 生成人可读的操作标签。"""
     parts = []
     if cmd.get("platform"):
-        parts.append({"jd": "京东工业品", "zkh": "震坤行"}.get(cmd["platform"], cmd["platform"]))
+        parts.append(_PLAT_CN[cmd["platform"]])
     if cmd.get("brandKeep"):
         parts.append(f"只看{cmd['brandKeep']}")
     if cmd.get("brandDrop"):
-        parts.append(f"排除{cmd['brandDrop']}")
+        parts.append(f"去掉{cmd['brandDrop']}")
     if cmd.get("priceMin") is not None and cmd.get("priceMax") is not None:
-        parts.append(f"{_fmt_price(cmd['priceMin'])}-{_fmt_price(cmd['priceMax'])}元")
+        parts.append(f"{cmd['priceMin']:g}–{cmd['priceMax']:g}元")
     elif cmd.get("priceMax") is not None:
-        parts.append(f"{_fmt_price(cmd['priceMax'])}元以下")
+        parts.append(f"≤{cmd['priceMax']:g}元")
     elif cmd.get("priceMin") is not None:
-        parts.append(f"{_fmt_price(cmd['priceMin'])}元以上")
+        parts.append(f"≥{cmd['priceMin']:g}元")
     if cmd.get("sort") == "asc":
-        parts.append("价格升序")
+        parts.append("按价格最低" + (f"取前{cmd['limit']}" if cmd.get("limit") else "排序"))
     elif cmd.get("sort") == "desc":
-        parts.append("价格降序")
-    if cmd.get("limit"):
-        parts.append(f"前{cmd['limit']}个")
-    return "、".join(parts) if parts else "精炼结果"
+        parts.append("按价格最高" + (f"取前{cmd['limit']}" if cmd.get("limit") else "排序"))
+    elif cmd.get("limit"):
+        parts.append(f"取前{cmd['limit']}")
+    return "、".join(parts) or "筛选"
 
 
 def parse_refinement(message: str) -> Optional[dict]:

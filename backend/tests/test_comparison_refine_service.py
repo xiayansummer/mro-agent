@@ -1,4 +1,4 @@
-from app.services.comparison_refine_service import parse_refinement, build_label
+from app.services.comparison_refine_service import parse_refinement, build_label, apply_refinement
 
 
 def test_sort_asc_with_topn_chinese_numeral():
@@ -126,3 +126,49 @@ def test_build_label_price_integer_direct():
                          "sort": None, "limit": None})
     assert "50元" in label
     assert "50.0" not in label
+
+
+# —— Task 2: apply_refinement + build_label 组合测试 ——
+
+def _offers():
+    return [
+        {"id": "a", "platform": "jd",  "title": "3M 防尘口罩 9001", "brand": "3M",   "priceValue": 30.0, "unitComparable": True},
+        {"id": "b", "platform": "jd",  "title": "霍尼韦尔 口罩",     "brand": "霍尼韦尔", "priceValue": 12.0, "unitComparable": True},
+        {"id": "c", "platform": "zkh", "title": "3M 口罩 KN95",     "brand": "3M",   "priceValue": 45.0, "unitComparable": True},
+        {"id": "d", "platform": "zkh", "title": "无名口罩",         "brand": None,   "priceValue": None, "unitComparable": False},
+    ]
+
+def test_apply_sort_asc_limit():
+    cmd = {"platform": None, "brandKeep": None, "brandDrop": None, "priceMin": None,
+           "priceMax": None, "sort": "asc", "limit": 2, "label": ""}
+    out = apply_refinement(_offers(), cmd)
+    assert [o["id"] for o in out] == ["b", "a"]   # 12 < 30,无价的 d 排末尾被 limit 截掉
+
+def test_apply_platform_then_sort():
+    cmd = {"platform": "jd", "brandKeep": None, "brandDrop": None, "priceMin": None,
+           "priceMax": None, "sort": "asc", "limit": None, "label": ""}
+    out = apply_refinement(_offers(), cmd)
+    assert [o["id"] for o in out] == ["b", "a"]   # 只剩 jd 的 a,b,按价升序
+
+def test_apply_brand_keep():
+    cmd = {"platform": None, "brandKeep": "3M", "brandDrop": None, "priceMin": None,
+           "priceMax": None, "sort": None, "limit": None, "label": ""}
+    out = apply_refinement(_offers(), cmd)
+    assert {o["id"] for o in out} == {"a", "c"}
+
+def test_apply_price_max_excludes_none():
+    cmd = {"platform": None, "brandKeep": None, "brandDrop": None, "priceMin": None,
+           "priceMax": 40.0, "sort": None, "limit": None, "label": ""}
+    out = apply_refinement(_offers(), cmd)
+    assert {o["id"] for o in out} == {"a", "b"}   # ≤40,无价 d 被剔除
+
+def test_apply_empty_result():
+    cmd = {"platform": None, "brandKeep": "西门子", "brandDrop": None, "priceMin": None,
+           "priceMax": None, "sort": None, "limit": None, "label": ""}
+    assert apply_refinement(_offers(), cmd) == []
+
+def test_build_label_composes():
+    cmd = {"platform": "jd", "brandKeep": None, "brandDrop": None, "priceMin": None,
+           "priceMax": 50.0, "sort": "asc", "limit": 3, "label": ""}
+    label = build_label(cmd)
+    assert "京东" in label and "50" in label and ("最低" in label or "便宜" in label)
