@@ -4,7 +4,7 @@ import logging
 from collections import OrderedDict
 from collections.abc import AsyncGenerator
 
-from app.services import chat_history_service, comparison_draft_service
+from app.services import chat_history_service, comparison_draft_service, comparison_refine_service, comparison_task_service
 from app.services.memory_service import memory_service
 
 logger = logging.getLogger(__name__)
@@ -87,6 +87,35 @@ async def handle_message(
     yield "event: thinking\ndata: 正在理解需求...\n\n"
 
     ctx = await get_session_context(session_id, user_id)
+
+    # —— 精炼早分支:对已有比价结果的指令,不走新建比价 ——
+    refine_cmd = comparison_refine_service.parse_refinement(user_message)
+    if refine_cmd is not None:
+        offers = await comparison_task_service.get_latest_session_offers(session_id, user_id)
+        if not offers:
+            guide = "您还没有可精炼的比价结果,先发起一次比价、出结果后我再帮您挑。"
+            yield f"event: text\ndata: {json.dumps(guide, ensure_ascii=False)}\n\n"
+            ctx["conversation"].append({"role": "user", "content": user_message})
+            ctx["conversation"].append({"role": "assistant", "content": guide})
+            yield "event: done\ndata: \n\n"
+            return
+        refined = comparison_refine_service.apply_refinement(offers, refine_cmd)
+        source_pt = ""  # 可选:来源商品名,v1 留空(operationLabel 已含上下文,前端卡片不依赖它)
+        if not refined:
+            msg = "当前比价结果里没有符合条件的商品。"
+            yield f"event: text\ndata: {json.dumps(msg, ensure_ascii=False)}\n\n"
+            ctx["conversation"].append({"role": "user", "content": user_message})
+            ctx["conversation"].append({"role": "assistant", "content": msg})
+            yield "event: done\ndata: \n\n"
+            return
+        payload = {"sourceProductType": source_pt, "operationLabel": refine_cmd["label"], "offers": refined}
+        yield "event: refined_offers\ndata: " + json.dumps(payload, ensure_ascii=False, default=str) + "\n\n"
+        intro = f"为您{refine_cmd['label']}:"
+        yield f"event: text\ndata: {json.dumps(intro, ensure_ascii=False)}\n\n"
+        ctx["conversation"].append({"role": "user", "content": user_message})
+        ctx["conversation"].append({"role": "assistant", "content": f"[精炼结果: {refine_cmd['label']},{len(refined)} 条]"})
+        yield "event: done\ndata: \n\n"
+        return
 
     # Build conversation context for Claude (keep last 6 turns)
     conv_messages = ctx["conversation"][-6:]
