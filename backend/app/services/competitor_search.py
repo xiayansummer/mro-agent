@@ -141,6 +141,7 @@ def _parse_product(p: dict) -> Optional[dict]:
             "sku": str(sku_code) if sku_code else None,
             "url": url,
             "delivery": delivery,
+            "image": p.get("pictureUrl"),
             "source": "西域",
         }
     except Exception as e:

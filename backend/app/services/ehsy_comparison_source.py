@@ -42,6 +42,7 @@ def _to_external_offer(p: dict, raw_rank: int) -> Optional[dict]:
         "deliveryText": p.get("delivery"),
         "productUrl": p.get("url") or _EHSY_SEARCH_FALLBACK,
         "platformSku": str(sku) if sku else None,
+        "imageUrl": p.get("image"),
         "rawRank": raw_rank,
     }
 
