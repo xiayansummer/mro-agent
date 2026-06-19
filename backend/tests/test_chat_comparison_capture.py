@@ -55,6 +55,39 @@ async def test_capturing_stream_persists_comparison_draft(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_capturing_stream_persists_refined_offers(monkeypatch):
+    from app.routers import chat
+    payload = {"sourceProductType": "防尘口罩", "operationLabel": "按价格最低取前1",
+               "offers": [{"id": "b", "title": "便宜货", "priceValue": 1}]}
+
+    async def fake_handle_message(*a, **k):
+        yield "event: refined_offers\ndata: " + json.dumps(payload) + "\n\n"
+        yield 'event: text\ndata: "为您按价格最低取前1:"\n\n'
+        yield "event: done\ndata: \n\n"
+
+    saved = {}
+    async def fake_save_turn(**kwargs):
+        saved.update(kwargs)
+
+    scheduled = []
+    real_ensure_future = chat.asyncio.ensure_future
+
+    def fake_ensure_future(coro):
+        task = real_ensure_future(coro)
+        scheduled.append(task)
+        return task
+
+    monkeypatch.setattr(chat, "handle_message", fake_handle_message)
+    monkeypatch.setattr(chat.chat_history_service, "save_turn", fake_save_turn)
+    monkeypatch.setattr(chat.asyncio, "ensure_future", fake_ensure_future)
+
+    chunks = [c async for c in chat._capturing_stream("u1", "s1", "最便宜的1个", "")]
+    assert len(scheduled) == 1
+    await scheduled[0]
+    assert saved.get("refined_offers") == payload["offers"]
+
+
+@pytest.mark.asyncio
 async def test_handle_message_emits_refined_offers_when_results_exist(monkeypatch):
     monkeypatch.setattr(agent.comparison_refine_service, "parse_refinement",
                         lambda m: {"sort": "asc", "limit": 1, "platform": None, "brandKeep": None,

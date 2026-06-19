@@ -68,7 +68,7 @@ async def get_session(session_id: str, user_id: str) -> Optional[dict]:
 
         msgs_r = await s.execute(
             text(
-                "SELECT id, role, content, image_data, sku_results, competitor_results, slot_clarification, comparison_draft "
+                "SELECT id, role, content, image_data, sku_results, competitor_results, slot_clarification, comparison_draft, refined_offers "
                 "FROM t_chat_message WHERE session_id = :sid ORDER BY id"
             ),
             {"sid": session_id},
@@ -79,6 +79,7 @@ async def get_session(session_id: str, user_id: str) -> Optional[dict]:
             comp_results = json.loads(m[5]) if m[5] else None
             slot_clar = json.loads(m[6]) if m[6] else None
             comparison_draft = json.loads(m[7]) if m[7] else None
+            refined = json.loads(m[8]) if m[8] else None
             comparison_task = await _comparison_task_for_draft(comparison_draft, user_id)
             messages.append({
                 "id": str(m[0]),
@@ -90,6 +91,7 @@ async def get_session(session_id: str, user_id: str) -> Optional[dict]:
                 "slotClarification": slot_clar,
                 "comparisonDraft": comparison_draft,
                 "comparisonTask": comparison_task,
+                "refinedOffers": refined,
             })
 
         return {
@@ -261,6 +263,7 @@ async def save_turn(
     competitor_results: Optional[list],
     slot_clarification: Optional[dict] = None,
     comparison_draft: Optional[dict] = None,
+    refined_offers: Optional[list] = None,
 ) -> None:
     """
     Save one user/assistant turn. Creates the session row if needed; updates title from
@@ -332,8 +335,8 @@ async def save_turn(
             # Insert assistant message
             await s.execute(
                 text(
-                    "INSERT INTO t_chat_message (session_id, role, content, sku_results, competitor_results, slot_clarification, comparison_draft) "
-                    "VALUES (:sid, 'assistant', :content, :sku, :comp, :slot, :draft)"
+                    "INSERT INTO t_chat_message (session_id, role, content, sku_results, competitor_results, slot_clarification, comparison_draft, refined_offers) "
+                    "VALUES (:sid, 'assistant', :content, :sku, :comp, :slot, :draft, :refined)"
                 ),
                 {
                     "sid": session_id,
@@ -342,6 +345,7 @@ async def save_turn(
                     "comp": json.dumps(competitor_results, ensure_ascii=False) if competitor_results else None,
                     "slot": json.dumps(slot_clarification, ensure_ascii=False) if slot_clarification else None,
                     "draft": json.dumps(comparison_draft, ensure_ascii=False) if comparison_draft else None,
+                    "refined": json.dumps(refined_offers, ensure_ascii=False) if refined_offers else None,
                 },
             )
 
