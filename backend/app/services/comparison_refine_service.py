@@ -41,6 +41,11 @@ def _to_float(tok: str) -> Optional[float]:
         return float(n) if n is not None else None
 
 
+def _fmt_price(v: float) -> str:
+    """将价格格式化为字符串:整数值去掉 .0(如 50.0 → '50'),否则保留小数。"""
+    return str(int(v)) if v == int(v) else str(v)
+
+
 def build_label(cmd: dict) -> str:
     """从 cmd 生成人可读的操作标签。Task 2 会替换为更完整实现。"""
     parts = []
@@ -51,11 +56,11 @@ def build_label(cmd: dict) -> str:
     if cmd.get("brandDrop"):
         parts.append(f"排除{cmd['brandDrop']}")
     if cmd.get("priceMin") is not None and cmd.get("priceMax") is not None:
-        parts.append(f"{cmd['priceMin']}-{cmd['priceMax']}元")
+        parts.append(f"{_fmt_price(cmd['priceMin'])}-{_fmt_price(cmd['priceMax'])}元")
     elif cmd.get("priceMax") is not None:
-        parts.append(f"{cmd['priceMax']}元以下")
+        parts.append(f"{_fmt_price(cmd['priceMax'])}元以下")
     elif cmd.get("priceMin") is not None:
-        parts.append(f"{cmd['priceMin']}元以上")
+        parts.append(f"{_fmt_price(cmd['priceMin'])}元以上")
     if cmd.get("sort") == "asc":
         parts.append("价格升序")
     elif cmd.get("sort") == "desc":
@@ -74,7 +79,7 @@ def parse_refinement(message: str) -> Optional[dict]:
            "priceMin": None, "priceMax": None, "sort": None, "limit": None, "label": ""}
     matched = False
 
-    def strip(span: str):
+    def consume(span: str):
         nonlocal work
         work = work.replace(span, " ", 1)
 
@@ -82,12 +87,12 @@ def parse_refinement(message: str) -> Optional[dict]:
     _neg_plat = re.search(r"(去掉|不要|排除|除了)\s*(京东工业品|京东|震坤行)", work)
     if _neg_plat:
         cmd["platform"] = "zkh" if "京东" in _neg_plat.group(2) else "jd"
-        strip(_neg_plat.group(0)); matched = True
+        consume(_neg_plat.group(0)); matched = True
     else:
         for kw, plat in _PLATFORM:
             if kw in work:
                 cmd["platform"] = plat
-                strip(kw)
+                consume(kw)
                 matched = True
                 break
 
@@ -97,30 +102,30 @@ def parse_refinement(message: str) -> Optional[dict]:
         a, b = _to_float(m.group(1)), _to_float(m.group(2))
         if a is not None and b is not None:
             cmd["priceMin"], cmd["priceMax"] = min(a, b), max(a, b)
-            strip(m.group(0)); matched = True
+            consume(m.group(0)); matched = True
     if cmd["priceMax"] is None:
         m = re.search(_NUM_RE + r"\s*元?\s*(以下|以内)|低于\s*" + _NUM_RE + r"|不超过\s*" + _NUM_RE, work)
         if m:
             tok = next((g for g in m.groups() if g), None)
             cmd["priceMax"] = _to_float(tok) if tok else None
             if cmd["priceMax"] is not None:
-                strip(m.group(0)); matched = True
+                consume(m.group(0)); matched = True
     if cmd["priceMin"] is None:
         m = re.search(_NUM_RE + r"\s*元?\s*以上|高于\s*" + _NUM_RE + r"|超过\s*" + _NUM_RE, work)
         if m:
             tok = next((g for g in m.groups() if g), None)
             cmd["priceMin"] = _to_float(tok) if tok else None
             if cmd["priceMin"] is not None:
-                strip(m.group(0)); matched = True
+                consume(m.group(0)); matched = True
 
     # 排序
     for kw in _ASC:
         if kw in work:
-            cmd["sort"] = "asc"; strip(kw); matched = True; break
+            cmd["sort"] = "asc"; consume(kw); matched = True; break
     if cmd["sort"] is None:
         for kw in _DESC:
             if kw in work:
-                cmd["sort"] = "desc"; strip(kw); matched = True; break
+                cmd["sort"] = "desc"; consume(kw); matched = True; break
 
     # 取前N: "前N(个)" 或 "N个"
     m = re.search(r"前\s*" + _NUM_RE + r"\s*个?|" + _NUM_RE + r"\s*个", work)
@@ -128,16 +133,17 @@ def parse_refinement(message: str) -> Optional[dict]:
         tok = next((g for g in m.groups() if g), None)
         n = _to_int(tok) if tok else None
         if n:
-            cmd["limit"] = n; strip(m.group(0)); matched = True
+            cmd["limit"] = n; consume(m.group(0)); matched = True
 
     # 品牌:保留 / 剔除(平台已先消费,避免"只看京东"被当品牌)
+    # 品牌 token 必须收紧:不允许跨过 的/品牌/标点/空白/行末,避免把商品名词吞入品牌
     if cmd["brandKeep"] is None:
-        m = re.search(r"(只看|只要|要)\s*([^\s,，。]+?)(?:的|品牌)?(?:$|\s)", work)
+        m = re.search(r"(只看|只要|要)\s*([^\s,，。的品]+?)(?:品牌|的|[,，。]|$)", work)
         if m and m.group(2) not in {"", "京东", "震坤行"}:
-            cmd["brandKeep"] = m.group(2); strip(m.group(0)); matched = True
-    m = re.search(r"(去掉|排除|不要|除了)\s*([^\s,，。0-9]+)", work)
+            cmd["brandKeep"] = m.group(2); consume(m.group(0)); matched = True
+    m = re.search(r"(去掉|排除|不要|除了)\s*([^\s,，。的品]+?)(?:品牌|的|[,，。]|$)", work)
     if m and m.group(2):
-        cmd["brandDrop"] = m.group(2); strip(m.group(0)); matched = True
+        cmd["brandDrop"] = m.group(2); consume(m.group(0)); matched = True
 
     if not matched:
         return None

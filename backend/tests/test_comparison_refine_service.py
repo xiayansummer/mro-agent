@@ -1,4 +1,4 @@
-from app.services.comparison_refine_service import parse_refinement
+from app.services.comparison_refine_service import parse_refinement, build_label
 
 
 def test_sort_asc_with_topn_chinese_numeral():
@@ -76,3 +76,53 @@ def test_operator_plus_product_noun_returns_none():
 def test_empty_and_greeting_returns_none():
     assert parse_refinement("") is None
     assert parse_refinement("你好") is None
+
+
+# —— I-1: 品牌 token 收紧 —— 只能捕获品牌本身,不能把后续商品名词吞入 token
+def test_brand_keep_tight_cjk():
+    """只看霍尼韦尔 → 品牌 token 精确为 '霍尼韦尔'"""
+    cmd = parse_refinement("只看霍尼韦尔")
+    assert cmd is not None
+    assert cmd["brandKeep"] == "霍尼韦尔"
+
+
+def test_brand_keep_tight_mixed():
+    """只看3M → 品牌 token 精确为 '3M'(含字母数字的品牌仍可捕获)"""
+    cmd = parse_refinement("只看3M")
+    assert cmd is not None
+    assert cmd["brandKeep"] == "3M"
+
+
+def test_brand_keep_with_product_noun_returns_none():
+    """只看霍尼韦尔品牌的手套 → 品牌=霍尼韦尔,残留'手套'(CJK 2字) → 保守 None"""
+    assert parse_refinement("只看霍尼韦尔品牌的手套") is None
+
+
+def test_brand_drop_tight_cjk():
+    """排除霍尼韦尔 → brandDrop 精确为 '霍尼韦尔'"""
+    cmd = parse_refinement("排除霍尼韦尔")
+    assert cmd is not None
+    assert cmd["brandDrop"] == "霍尼韦尔"
+
+
+def test_brand_drop_with_product_noun_returns_none():
+    """排除霍尼韦尔的产品 → 品牌=霍尼韦尔,残留'产品' → 保守 None"""
+    assert parse_refinement("排除霍尼韦尔的产品") is None
+
+
+# —— I-2: 标签价格整数化 —— 50.0 元应展示为 '50元' 不带 .0
+def test_label_price_integer_format():
+    """priceMax=50.0 的命令,标签应包含 '50元' 而非 '50.0元'"""
+    cmd = parse_refinement("50元以下的")
+    assert cmd is not None
+    assert "50元" in cmd["label"]
+    assert "50.0元" not in cmd["label"]
+
+
+def test_build_label_price_integer_direct():
+    """直接测试 build_label 对整数值价格的格式化"""
+    label = build_label({"priceMax": 50.0, "priceMin": None,
+                         "platform": None, "brandKeep": None, "brandDrop": None,
+                         "sort": None, "limit": None})
+    assert "50元" in label
+    assert "50.0" not in label
