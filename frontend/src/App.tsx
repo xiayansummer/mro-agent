@@ -207,6 +207,7 @@ export default function App() {
           messages={activeSession.messages}
           onMessagesChange={handleMessagesChange}
           onToggleSidebar={handleToggleSidebar}
+          onNewChat={handleNewChat}
         />
       )}
 

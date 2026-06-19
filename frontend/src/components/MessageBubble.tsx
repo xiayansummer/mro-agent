@@ -17,6 +17,7 @@ interface Props {
   onComparisonStart?: (messageId: string, draftId: string) => void;
   onComparisonRefresh?: (messageId: string, taskId: string) => void;
   onComparisonRetry?: (messageId: string, taskId: string, platform: string) => void;
+  onNewComparison?: () => void;
 }
 
 export default function MessageBubble({
@@ -27,6 +28,7 @@ export default function MessageBubble({
   onComparisonStart,
   onComparisonRefresh,
   onComparisonRetry,
+  onNewComparison,
 }: Props) {
   const isUser = message.role === "user";
   const [copied, setCopied] = useState(false);
@@ -140,6 +142,7 @@ export default function MessageBubble({
               sessionId={sessionId}
               onRefresh={() => onComparisonRefresh?.(message.id, message.comparisonTask!.id)}
               onRetryPlatform={(platform) => onComparisonRetry?.(message.id, message.comparisonTask!.id, platform)}
+              onNewComparison={onNewComparison}
             />
           </div>
         )}

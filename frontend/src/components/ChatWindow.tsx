@@ -20,9 +20,10 @@ interface Props {
   messages: ChatMessage[];
   onMessagesChange: (msgs: ChatMessage[]) => void;
   onToggleSidebar: () => void;
+  onNewChat?: () => void;
 }
 
-export default function ChatWindow({ sessionId, messages, onMessagesChange, onToggleSidebar }: Props) {
+export default function ChatWindow({ sessionId, messages, onMessagesChange, onToggleSidebar, onNewChat }: Props) {
   const [isLoading, setIsLoading] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const messagesRef = useRef(messages);
@@ -314,6 +315,7 @@ export default function ChatWindow({ sessionId, messages, onMessagesChange, onTo
               onComparisonStart={handleComparisonStart}
               onComparisonRefresh={handleComparisonRefresh}
               onComparisonRetry={handleComparisonRetry}
+              onNewComparison={onNewChat}
             />
           ))}
           <div ref={bottomRef} />

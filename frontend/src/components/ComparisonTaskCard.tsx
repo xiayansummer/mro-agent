@@ -7,6 +7,7 @@ interface Props {
   sessionId?: string;
   onRefresh?: () => void;
   onRetryPlatform?: (platform: ComparisonPlatform) => void;
+  onNewComparison?: () => void;
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -21,7 +22,7 @@ const STATUS_LABELS: Record<string, string> = {
   timeout: "超时",
 };
 
-export default function ComparisonTaskCard({ task, sessionId, onRefresh, onRetryPlatform }: Props) {
+export default function ComparisonTaskCard({ task, sessionId, onRefresh, onRetryPlatform, onNewComparison }: Props) {
   const offers = task.subtasks.flatMap((subtask) =>
     subtask.items.map((item) => ({ ...item, platform: subtask.platform }))
   ).sort(compareOffers);
@@ -41,7 +42,10 @@ export default function ComparisonTaskCard({ task, sessionId, onRefresh, onRetry
             及时标记候选是否合适，反馈越多，AI 后续越懂您的采购偏好。
           </div>
         </div>
-        <button onClick={onRefresh} style={buttonStyle}>刷新</button>
+        <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+          <button onClick={onNewComparison} style={buttonStyle}>🔄 换个产品比价</button>
+          <button onClick={onRefresh} style={buttonStyle}>刷新</button>
+        </div>
       </div>
 
       {!progress.isTerminal && (
