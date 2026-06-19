@@ -561,7 +561,7 @@ async def test_get_latest_session_offers_flattens_items(monkeypatch):
         async def __aexit__(self, *a): return False
         async def execute(self, statement, params):
             assert "chat_session_id" in str(statement)
-            return FakeResult(("task-1",))
+            return FakeResult(row=("task-1",), rows=[("task-1",)])
     monkeypatch.setattr(comparison_task_service, "AsyncSessionLocal", S)
     monkeypatch.setattr(comparison_task_service, "_require_db_user_id", lambda u: 7)
 
@@ -586,6 +586,53 @@ async def test_get_latest_session_offers_none_when_no_task(monkeypatch):
     monkeypatch.setattr(comparison_task_service, "AsyncSessionLocal", S)
     monkeypatch.setattr(comparison_task_service, "_require_db_user_id", lambda u: 7)
     assert await comparison_task_service.get_latest_session_offers("sess-x", "u7") is None
+
+
+@pytest.mark.asyncio
+async def test_get_latest_session_offers_skips_empty_latest_task(monkeypatch):
+    """最新 task 为空(重跑返 0 条 / 平台未登录)时,应回退到最近一个【有 offer】的 task,
+    而不是误报"无可精炼结果"。复现 P2:防尘口罩最新 task items=0、更早 task items=9。"""
+    class S:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def execute(self, statement, params):
+            # 倒序:最新的空 task 在前,更早的有货 task 在后
+            return FakeResult(row=("task-empty",), rows=[("task-empty",), ("task-full",)])
+    monkeypatch.setattr(comparison_task_service, "AsyncSessionLocal", S)
+    monkeypatch.setattr(comparison_task_service, "_require_db_user_id", lambda u: 7)
+
+    async def fake_get_task(task_id, user_id):
+        if task_id == "task-empty":
+            return {"id": "task-empty", "subtasks": [
+                {"platform": "jd", "items": []},
+                {"platform": "zkh", "items": []},
+            ]}
+        return {"id": "task-full", "subtasks": [
+            {"platform": "jd", "items": [{"id": "x", "priceValue": 9}]},
+        ]}
+    monkeypatch.setattr(comparison_task_service, "get_task", fake_get_task)
+
+    offers = await comparison_task_service.get_latest_session_offers("sess-1", "u7")
+    assert offers is not None, "最新 task 空不应直接 None,应回退到更早的非空 task"
+    assert [o["id"] for o in offers] == ["x"]
+
+
+@pytest.mark.asyncio
+async def test_get_latest_session_offers_none_when_all_tasks_empty(monkeypatch):
+    """会话内所有 task 都没有 offer(如全程插件未登录)时,才返回 None。"""
+    class S:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def execute(self, statement, params):
+            return FakeResult(rows=[("t1",), ("t2",)])
+    monkeypatch.setattr(comparison_task_service, "AsyncSessionLocal", S)
+    monkeypatch.setattr(comparison_task_service, "_require_db_user_id", lambda u: 7)
+
+    async def fake_get_task(task_id, user_id):
+        return {"id": task_id, "subtasks": [{"platform": "jd", "items": []}]}
+    monkeypatch.setattr(comparison_task_service, "get_task", fake_get_task)
+
+    assert await comparison_task_service.get_latest_session_offers("s", "u7") is None
 
 
 @pytest.mark.asyncio

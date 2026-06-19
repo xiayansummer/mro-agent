@@ -277,7 +277,12 @@ async def get_latest_task_for_draft(draft_id: str, user_id: str) -> Optional[dic
 
 
 async def get_latest_session_offers(session_id: str, user_id: str) -> Optional[list[dict]]:
-    """本会话最近一个比价 task 的全部 offers(跨平台拍平),无 task/无 offers → None。
+    """本会话最近一个【有 offer】的比价 task 的全部 offers(跨平台拍平),无则 None。
+
+    取的是"最近一个非空 task",而非"最近一个 task":比价可能被重跑/失败,最新的 task
+    可能 0 offer(jd 重跑返空、zkh 未登录),而用户要精炼的是他们看到的、最近一次真出了
+    结果的那批 offer——往往在更早的 task 里。只看最新一个 task 会把这些会话误报"无可精炼
+    结果"。这里从最近若干个 task 新→旧扫,返回第一个有 offer 的;全空才 None。
 
     精炼指令的操作对象:不重新抓取,直接复用已采集结果(含 disliked 过滤,在 get_task 内)。
     """
@@ -290,19 +295,20 @@ async def get_latest_session_offers(session_id: str, user_id: str) -> Optional[l
                 JOIN comparison_drafts d ON t.draft_id = d.id
                 WHERE d.chat_session_id = :sid AND t.user_id = :uid
                 ORDER BY t.created_at DESC, t.id DESC
-                LIMIT 1
+                LIMIT 10
                 """
             ),
             {"sid": session_id, "uid": db_user_id},
         )
-        row = result.fetchone()
-    if not row:
-        return None
-    task = await get_task(row[0], user_id)
-    if not task:
-        return None
-    offers = [item for st in task.get("subtasks", []) for item in (st.get("items") or [])]
-    return offers or None
+        rows = result.fetchall()
+    for row in rows:
+        task = await get_task(row[0], user_id)
+        if not task:
+            continue
+        offers = [item for st in task.get("subtasks", []) for item in (st.get("items") or [])]
+        if offers:
+            return offers
+    return None
 
 
 async def retry_subtask(task_id: str, platform: str, user_id: str) -> Optional[dict]:
