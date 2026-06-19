@@ -13,7 +13,7 @@ def test_comparison_structure_defaults():
 
     assert structure.category.confidence == 0.0
     assert structure.specification.attributes == []
-    assert structure.purchaseConstraints.preferredPlatforms == ["jd", "zkh"]
+    assert structure.purchaseConstraints.preferredPlatforms == ["jd", "zkh", "ehsy"]
     assert structure.searchTerms.jd == []
     assert structure.searchTerms.zkh == []
 
@@ -51,3 +51,16 @@ def test_external_offer_rejects_unknown_platform():
 def test_comparison_status_values_are_stable():
     assert ComparisonDraftStatus.NEEDS_CONFIRMATION == "needs_confirmation"
     assert ComparisonDraftStatus.TASK_CREATED == "task_created"
+
+
+def test_platform_accepts_ehsy():
+    o = ExternalOffer(
+        id="ehsy-X1", platform="ehsy", title="3M 口罩", unitComparable=False,
+        productUrl="https://www.ehsy.com/product-X1", rawRank=0, matchScore=0.0,
+    )
+    assert o.platform == "ehsy"
+
+
+def test_structure_default_platforms_include_ehsy():
+    s = ComparisonStructure()
+    assert s.purchaseConstraints.preferredPlatforms == ["jd", "zkh", "ehsy"]

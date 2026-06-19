@@ -4,7 +4,7 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field
 
 
-Platform = Literal["jd", "zkh"]
+Platform = Literal["jd", "zkh", "ehsy"]
 
 
 class ComparisonDraftStatus(StrEnum):
@@ -72,7 +72,7 @@ class PurchaseConstraints(BaseModel):
     unit: Optional[str] = None
     budgetMax: Optional[float] = None
     deliveryRequiredBy: Optional[str] = None
-    preferredPlatforms: list[Platform] = Field(default_factory=lambda: ["jd", "zkh"])
+    preferredPlatforms: list[Platform] = Field(default_factory=lambda: ["jd", "zkh", "ehsy"])
     requireInStock: Optional[bool] = None
 
 
