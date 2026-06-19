@@ -368,6 +368,10 @@ def test_fallback_keyword_strips_procurement_prefix():
     assert _fallback_keyword_from_message("你好") == ""
     assert _fallback_keyword_from_message("") == ""
     assert _fallback_keyword_from_message("买") == ""  # 单字无实义
+    # 多词查询必须保留空格:否则粘成一个不可分词串(ranker 的 _tokens 按空格切),
+    # productType 匹配不上任何 offer → 三平台 0 结果。
+    assert _fallback_keyword_from_message("防尘口罩 KN95 带阀 耳戴式") == "防尘口罩 KN95 带阀 耳戴式"
+    assert _fallback_keyword_from_message("帮我找 M8 304 螺栓") == "M8 304 螺栓"
 
 
 def test_has_procurement_object_accepts_l2_only():

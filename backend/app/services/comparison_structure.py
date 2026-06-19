@@ -64,7 +64,10 @@ def _fallback_keyword_from_message(user_message: str) -> str:
     text = text.strip("，。、!！?？ \t")
     if text.lower() in _GREETING_OR_EMPTY or len(text) < 2:
         return ""
-    return text.replace(" ", "")
+    # 保留空格:多词查询(如"防尘口罩 KN95 带阀 耳戴式")若去空格会粘成单 token,
+    # ranker 的 _tokens 按空格切→productType 匹配不上任何 offer→三平台 0 结果。
+    # 单词产品(防尘口罩)本就无空格,不受影响。
+    return text
 
 
 async def build_comparison_structure(
