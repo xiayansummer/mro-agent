@@ -1,4 +1,5 @@
 import json
+import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -12,10 +13,12 @@ from app.models.comparison import (
     ComparisonTaskStatus,
     ExtensionStatus,
 )
-from app.services import extension_service
+from app.services import ehsy_comparison_source, extension_service
 from app.services.comparison_ranker import rank_external_offers
 from app.services.memory_service import memory_service
 from app.services.user_service import _external_id_to_db_id, db_id_to_external_id
+
+logger = logging.getLogger(__name__)
 
 SUBTASK_LEASE_SECONDS = 90
 
@@ -27,7 +30,7 @@ async def start_draft(draft_id: str, user_id: str) -> Optional[dict]:
         draft_result = await session.execute(
             text(
                 """
-                SELECT id, selected_platforms, search_terms_json
+                SELECT id, selected_platforms, search_terms_json, structure_json
                 FROM comparison_drafts
                 WHERE id = :draft_id AND user_id = :uid
                 """
@@ -56,10 +59,11 @@ async def start_draft(draft_id: str, user_id: str) -> Optional[dict]:
             return await get_task(existing_row[0], user_id)
 
         task_id = _new_id("cmp_task")
-        selected_platforms = _loads(draft[1]) or ["jd", "zkh"]
+        selected_platforms = _loads(draft[1]) or ["jd", "zkh", "ehsy"]
         search_terms = _loads(draft[2]) or {}
         extension_status = await extension_service.get_extension_status(user_id)
-        subtask_specs = _build_subtask_specs(selected_platforms, search_terms, extension_status)
+        extension_platforms = [p for p in selected_platforms if p != "ehsy"]
+        subtask_specs = _build_subtask_specs(extension_platforms, search_terms, extension_status)
         task_status = _task_status_for_subtasks(subtask_specs)
         draft_status = (
             ComparisonDraftStatus.TASK_CREATED
@@ -118,7 +122,59 @@ async def start_draft(draft_id: str, user_id: str) -> Optional[dict]:
         )
         await session.commit()
 
+    if "ehsy" in selected_platforms:
+        await _inject_ehsy_subtask(task_id, user_id, _loads(draft[3]) or {}, search_terms)
+
     return await get_task(task_id, user_id)
+
+
+def _ehsy_search_term(search_terms: dict, structure: dict) -> str:
+    for key in ("jd", "zkh"):
+        terms = search_terms.get(key) or []
+        if terms:
+            return terms[0]
+    return ((structure or {}).get("specification") or {}).get("productType") or ""
+
+
+async def _inject_ehsy_subtask(task_id: str, user_id: str, structure: dict, search_terms: dict) -> None:
+    """后端服务端抓西域,排序后以 DONE 子任务落库。独立 session + try/except:
+    西域故障绝不影响已提交的 jd/zkh 子任务。"""
+    try:
+        term = _ehsy_search_term(search_terms, structure)
+        if not term:
+            return
+        raw = await ehsy_comparison_source.fetch_ehsy_offers(term)
+        if not raw:
+            # 也写一个 0 条的 DONE 子任务,让前端显示"西域:暂无匹配"
+            raw_ranked = []
+        else:
+            preferences = await memory_service.get_preference_signals(user_id)
+            raw_ranked = [
+                {**o, "selectedSearchTerm": term}
+                for o in rank_external_offers(structure, raw, preferences=preferences)
+            ]
+        subtask_id = _new_id("cmp_subtask")
+        async with AsyncSessionLocal() as session:
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO comparison_subtasks (id, task_id, platform, status, search_terms_json, items_json)
+                    VALUES (:id, :task_id, :platform, :status, :search_terms_json, :items_json)
+                    """
+                ),
+                {
+                    "id": subtask_id,
+                    "task_id": task_id,
+                    "platform": "ehsy",
+                    "status": ComparisonSubtaskStatus.DONE.value,
+                    "search_terms_json": _json([term]),
+                    "items_json": _json(raw_ranked),
+                },
+            )
+            await _refresh_task_status(session, subtask_id)
+            await session.commit()
+    except Exception:
+        logger.warning("ehsy injection failed; comparison continues without 西域", exc_info=True)
 
 
 def filter_disliked_items(subtasks: list[dict], disliked_skus) -> list[dict]:

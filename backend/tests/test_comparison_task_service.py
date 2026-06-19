@@ -34,7 +34,7 @@ class FakeSession:
 
     async def execute(self, statement, params):
         sql = str(statement)
-        if "SELECT id, selected_platforms, search_terms_json" in sql:
+        if "SELECT id, selected_platforms, search_terms_json, structure_json" in sql:
             draft = self.__class__.drafts.get((params["draft_id"], params["uid"]))
             return FakeResult(draft)
 
@@ -261,6 +261,7 @@ def fake_db(monkeypatch):
             "draft-1",
             json.dumps(["jd", "zkh"]),
             json.dumps({"jd": ["jd term"], "zkh": ["zkh term"]}),
+            _structure_json(),
         )
     }
     FakeSession.tasks = {}
@@ -585,6 +586,69 @@ async def test_get_latest_session_offers_none_when_no_task(monkeypatch):
     monkeypatch.setattr(comparison_task_service, "AsyncSessionLocal", S)
     monkeypatch.setattr(comparison_task_service, "_require_db_user_id", lambda u: 7)
     assert await comparison_task_service.get_latest_session_offers("sess-x", "u7") is None
+
+
+@pytest.mark.asyncio
+async def test_ehsy_search_term_prefers_jd_then_zkh_then_producttype():
+    from app.services.comparison_task_service import _ehsy_search_term
+    assert _ehsy_search_term({"jd": ["a", "b"], "zkh": ["c"]}, {}) == "a"
+    assert _ehsy_search_term({"jd": [], "zkh": ["c"]}, {}) == "c"
+    assert _ehsy_search_term({}, {"specification": {"productType": "口罩"}}) == "口罩"
+
+
+@pytest.mark.asyncio
+async def test_inject_ehsy_inserts_done_subtask(monkeypatch):
+    from app.services import comparison_task_service as svc
+
+    captured = {}
+
+    class S:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def execute(self, statement, params):
+            if "INSERT INTO comparison_subtasks" in str(statement):
+                captured.update(params)
+            return FakeResult()
+        async def commit(self): pass
+    monkeypatch.setattr(svc, "AsyncSessionLocal", S)
+
+    async def fake_fetch(term, limit=8):
+        return [{"id": "ehsy-1", "platform": "ehsy", "priceValue": 4.0, "title": "口罩"}]
+    monkeypatch.setattr(svc.ehsy_comparison_source, "fetch_ehsy_offers", fake_fetch)
+    monkeypatch.setattr(svc, "rank_external_offers", lambda s, o, preferences=None: o)
+    async def fake_prefs(uid): return {}
+    monkeypatch.setattr(svc.memory_service, "get_preference_signals", fake_prefs)
+    async def fake_refresh(session, sid): return None
+    monkeypatch.setattr(svc, "_refresh_task_status", fake_refresh)
+
+    await svc._inject_ehsy_subtask("task-1", "u7", {"specification": {"productType": "口罩"}}, {"jd": ["口罩"]})
+
+    assert captured.get("platform") == "ehsy"
+    assert captured.get("status") == svc.ComparisonSubtaskStatus.DONE.value
+    assert "口罩" in captured.get("items_json", "")
+
+
+@pytest.mark.asyncio
+async def test_inject_ehsy_swallows_failure(monkeypatch):
+    from app.services import comparison_task_service as svc
+    inserted = {"n": 0}
+
+    class S:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def execute(self, statement, params):
+            inserted["n"] += 1
+            return FakeResult()
+        async def commit(self): pass
+    monkeypatch.setattr(svc, "AsyncSessionLocal", S)
+
+    async def boom(term, limit=8):
+        raise RuntimeError("ehsy down")
+    monkeypatch.setattr(svc.ehsy_comparison_source, "fetch_ehsy_offers", boom)
+
+    # 不抛异常,且没有 INSERT
+    await svc._inject_ehsy_subtask("task-1", "u7", {}, {"jd": ["口罩"]})
+    assert inserted["n"] == 0
 
 
 def _seed_running_subtask():
