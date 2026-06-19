@@ -6,7 +6,7 @@ def test_sort_asc_with_topn_chinese_numeral():
     assert cmd is not None
     assert cmd["sort"] == "asc"
     assert cmd["limit"] == 5
-    assert cmd["platform"] is None and cmd["brandKeep"] is None
+    assert cmd["platformKeep"] is None and cmd["platformDrop"] is None and cmd["brandKeep"] is None
 
 
 def test_sort_asc_arabic_topn():
@@ -29,9 +29,9 @@ def test_brand_drop():
     assert cmd["brandDrop"] == "霍尼韦尔"
 
 
-def test_platform_drop_negation():
-    cmd = parse_refinement("去掉震坤行的")   # 去掉 zkh = 只看 jd(仅两平台)
-    assert cmd["platform"] == "jd"
+def test_platform_drop():
+    assert parse_refinement("去掉震坤行")["platformDrop"] == "zkh"
+    assert parse_refinement("去掉西域")["platformDrop"] == "ehsy"
 
 
 def test_price_max():
@@ -44,14 +44,14 @@ def test_price_range():
     assert cmd["priceMin"] == 20.0 and cmd["priceMax"] == 50.0
 
 
-def test_platform_filter():
-    cmd = parse_refinement("只看京东工业品")
-    assert cmd["platform"] == "jd"
+def test_platform_keep():
+    assert parse_refinement("只看京东工业品")["platformKeep"] == "jd"
+    assert parse_refinement("只看西域")["platformKeep"] == "ehsy"
 
 
 def test_composition_platform_sort_limit():
     cmd = parse_refinement("京东上最便宜的3个")
-    assert cmd["platform"] == "jd" and cmd["sort"] == "asc" and cmd["limit"] == 3
+    assert cmd["platformKeep"] == "jd" and cmd["sort"] == "asc" and cmd["limit"] == 3
 
 
 def test_label_present():
@@ -122,7 +122,8 @@ def test_label_price_integer_format():
 def test_build_label_price_integer_direct():
     """直接测试 build_label 对整数值价格的格式化"""
     label = build_label({"priceMax": 50.0, "priceMin": None,
-                         "platform": None, "brandKeep": None, "brandDrop": None,
+                         "platformKeep": None, "platformDrop": None,
+                         "brandKeep": None, "brandDrop": None,
                          "sort": None, "limit": None})
     assert "50元" in label
     assert "50.0" not in label
@@ -139,36 +140,60 @@ def _offers():
     ]
 
 def test_apply_sort_asc_limit():
-    cmd = {"platform": None, "brandKeep": None, "brandDrop": None, "priceMin": None,
-           "priceMax": None, "sort": "asc", "limit": 2, "label": ""}
+    cmd = {"platformKeep": None, "platformDrop": None, "brandKeep": None, "brandDrop": None,
+           "priceMin": None, "priceMax": None, "sort": "asc", "limit": 2, "label": ""}
     out = apply_refinement(_offers(), cmd)
     assert [o["id"] for o in out] == ["b", "a"]   # 12 < 30,无价的 d 排末尾被 limit 截掉
 
 def test_apply_platform_then_sort():
-    cmd = {"platform": "jd", "brandKeep": None, "brandDrop": None, "priceMin": None,
-           "priceMax": None, "sort": "asc", "limit": None, "label": ""}
+    cmd = {"platformKeep": "jd", "platformDrop": None, "brandKeep": None, "brandDrop": None,
+           "priceMin": None, "priceMax": None, "sort": "asc", "limit": None, "label": ""}
     out = apply_refinement(_offers(), cmd)
     assert [o["id"] for o in out] == ["b", "a"]   # 只剩 jd 的 a,b,按价升序
 
 def test_apply_brand_keep():
-    cmd = {"platform": None, "brandKeep": "3M", "brandDrop": None, "priceMin": None,
-           "priceMax": None, "sort": None, "limit": None, "label": ""}
+    cmd = {"platformKeep": None, "platformDrop": None, "brandKeep": "3M", "brandDrop": None,
+           "priceMin": None, "priceMax": None, "sort": None, "limit": None, "label": ""}
     out = apply_refinement(_offers(), cmd)
     assert {o["id"] for o in out} == {"a", "c"}
 
 def test_apply_price_max_excludes_none():
-    cmd = {"platform": None, "brandKeep": None, "brandDrop": None, "priceMin": None,
-           "priceMax": 40.0, "sort": None, "limit": None, "label": ""}
+    cmd = {"platformKeep": None, "platformDrop": None, "brandKeep": None, "brandDrop": None,
+           "priceMin": None, "priceMax": 40.0, "sort": None, "limit": None, "label": ""}
     out = apply_refinement(_offers(), cmd)
     assert {o["id"] for o in out} == {"a", "b"}   # ≤40,无价 d 被剔除
 
 def test_apply_empty_result():
-    cmd = {"platform": None, "brandKeep": "西门子", "brandDrop": None, "priceMin": None,
-           "priceMax": None, "sort": None, "limit": None, "label": ""}
+    cmd = {"platformKeep": None, "platformDrop": None, "brandKeep": "西门子", "brandDrop": None,
+           "priceMin": None, "priceMax": None, "sort": None, "limit": None, "label": ""}
     assert apply_refinement(_offers(), cmd) == []
 
 def test_build_label_composes():
-    cmd = {"platform": "jd", "brandKeep": None, "brandDrop": None, "priceMin": None,
-           "priceMax": 50.0, "sort": "asc", "limit": 3, "label": ""}
+    cmd = {"platformKeep": "jd", "platformDrop": None, "brandKeep": None, "brandDrop": None,
+           "priceMin": None, "priceMax": 50.0, "sort": "asc", "limit": 3, "label": ""}
     label = build_label(cmd)
     assert "京东" in label and "50" in label and ("最低" in label or "便宜" in label)
+
+
+# —— 新增 apply 层 keep/drop 测试 ——
+def test_apply_platform_keep_ehsy():
+    offers = [{"id": "a", "platform": "jd", "priceValue": 1},
+              {"id": "b", "platform": "ehsy", "priceValue": 2}]
+    cmd = {"platformKeep": "ehsy", "platformDrop": None, "brandKeep": None, "brandDrop": None,
+           "priceMin": None, "priceMax": None, "sort": None, "limit": None, "label": ""}
+    assert [o["id"] for o in apply_refinement(offers, cmd)] == ["b"]
+
+
+def test_apply_platform_drop_ehsy():
+    offers = [{"id": "a", "platform": "jd", "priceValue": 1},
+              {"id": "b", "platform": "ehsy", "priceValue": 2}]
+    cmd = {"platformKeep": None, "platformDrop": "ehsy", "brandKeep": None, "brandDrop": None,
+           "priceMin": None, "priceMax": None, "sort": None, "limit": None, "label": ""}
+    assert [o["id"] for o in apply_refinement(offers, cmd)] == ["a"]
+
+
+def test_label_ehsy_keep_and_drop():
+    base = {"platformKeep": None, "platformDrop": None, "brandKeep": None, "brandDrop": None,
+            "priceMin": None, "priceMax": None, "sort": None, "limit": None}
+    assert build_label({**base, "platformKeep": "ehsy"}) == "西域"
+    assert build_label({**base, "platformDrop": "ehsy"}) == "去掉西域"

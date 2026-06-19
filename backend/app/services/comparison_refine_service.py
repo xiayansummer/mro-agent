@@ -15,7 +15,8 @@ _CN_NUM = {"一": 1, "两": 2, "二": 2, "三": 3, "四": 4, "五": 5,
 _ASC = ("最便宜", "价格最低", "最低价", "价格从低到高", "便宜的", "低价", "价低")
 _DESC = ("最贵", "价格最高", "最高价", "价格从高到低", "贵的", "高价")
 _PLATFORM = (("京东工业品", "jd"), ("京东", "jd"), ("jd", "jd"),
-             ("震坤行", "zkh"), ("zkh", "zkh"))
+             ("震坤行", "zkh"), ("zkh", "zkh"),
+             ("西域", "ehsy"), ("ehsy", "ehsy"))
 
 # 去掉操作符后,残留里属于"命令/连接/数量"的词不算新商品名词
 _STOP = ("能不能", "可不可以", "可以", "帮我", "帮", "请", "选出", "挑出", "挑", "给我",
@@ -43,7 +44,8 @@ def _to_float(tok: str) -> Optional[float]:
         return float(n) if n is not None else None
 
 
-_PLAT_CN = {"jd": "京东工业品", "zkh": "震坤行"}
+_PLAT_CN = {"jd": "京东工业品", "zkh": "震坤行", "ehsy": "西域"}
+_PLAT_NEG_MAP = {"京东工业品": "jd", "京东": "jd", "震坤行": "zkh", "西域": "ehsy", "ehsy": "ehsy"}
 
 
 def _brand_text(offer: dict) -> str:
@@ -53,8 +55,10 @@ def _brand_text(offer: dict) -> str:
 def apply_refinement(offers: list[dict], cmd: dict) -> list[dict]:
     """在已采集 offers 上执行精炼操作:过滤 → 排序 → 取前N,纯函数无 IO。"""
     out = list(offers)
-    if cmd.get("platform"):
-        out = [o for o in out if o.get("platform") == cmd["platform"]]
+    if cmd.get("platformKeep"):
+        out = [o for o in out if o.get("platform") == cmd["platformKeep"]]
+    if cmd.get("platformDrop"):
+        out = [o for o in out if o.get("platform") != cmd["platformDrop"]]
     if cmd.get("brandKeep"):
         out = [o for o in out if text_matches_brand(_brand_text(o), cmd["brandKeep"])]
     if cmd.get("brandDrop"):
@@ -77,8 +81,10 @@ def apply_refinement(offers: list[dict], cmd: dict) -> list[dict]:
 def build_label(cmd: dict) -> str:
     """从 cmd 生成人可读的操作标签。"""
     parts = []
-    if cmd.get("platform"):
-        parts.append(_PLAT_CN[cmd["platform"]])
+    if cmd.get("platformKeep"):
+        parts.append(_PLAT_CN[cmd["platformKeep"]])
+    if cmd.get("platformDrop"):
+        parts.append("去掉" + _PLAT_CN[cmd["platformDrop"]])
     if cmd.get("brandKeep"):
         parts.append(f"只看{cmd['brandKeep']}")
     if cmd.get("brandDrop"):
@@ -103,7 +109,7 @@ def parse_refinement(message: str) -> Optional[dict]:
     if not text:
         return None
     work = text
-    cmd = {"platform": None, "brandKeep": None, "brandDrop": None,
+    cmd = {"platformKeep": None, "platformDrop": None, "brandKeep": None, "brandDrop": None,
            "priceMin": None, "priceMax": None, "sort": None, "limit": None, "label": ""}
     matched = False
 
@@ -111,15 +117,15 @@ def parse_refinement(message: str) -> Optional[dict]:
         nonlocal work
         work = work.replace(span, " ", 1)
 
-    # 平台(先判否定:"去掉/不要/排除 震坤行"=只看另一平台;仅两平台)
-    _neg_plat = re.search(r"(去掉|不要|排除|除了)\s*(京东工业品|京东|震坤行)", work)
+    # 平台:先判否定(去掉/排除/不要 X)→ platformDrop;否则 只看 X → platformKeep。
+    _neg_plat = re.search(r"(去掉|不要|排除|除了)\s*(京东工业品|京东|震坤行|西域|ehsy)", work)
     if _neg_plat:
-        cmd["platform"] = "zkh" if "京东" in _neg_plat.group(2) else "jd"
+        cmd["platformDrop"] = _PLAT_NEG_MAP[_neg_plat.group(2)]
         consume(_neg_plat.group(0)); matched = True
     else:
         for kw, plat in _PLATFORM:
             if kw in work:
-                cmd["platform"] = plat
+                cmd["platformKeep"] = plat
                 consume(kw)
                 matched = True
                 break
@@ -167,7 +173,7 @@ def parse_refinement(message: str) -> Optional[dict]:
     # 品牌 token 必须收紧:不允许跨过 的/品牌/标点/空白/行末,避免把商品名词吞入品牌
     if cmd["brandKeep"] is None:
         m = re.search(r"(只看|只要|要)\s*([^\s,，。的品]+?)(?:品牌|的|[,，。]|$)", work)
-        if m and m.group(2) not in {"", "京东", "震坤行"}:
+        if m and m.group(2) not in {"", "京东", "震坤行", "西域"}:
             cmd["brandKeep"] = m.group(2); consume(m.group(0)); matched = True
     m = re.search(r"(去掉|排除|不要|除了)\s*([^\s,，。的品]+?)(?:品牌|的|[,，。]|$)", work)
     if m and m.group(2):
