@@ -77,7 +77,13 @@ export interface AuthUser {
   auth_token: string;
 }
 
-export type ComparisonPlatform = "jd" | "zkh";
+export type ComparisonPlatform = "jd" | "zkh" | "ehsy";
+
+export const PLATFORM_LABELS: Record<ComparisonPlatform, string> = {
+  jd: "京东工业品",
+  zkh: "震坤行",
+  ehsy: "西域",
+};
 
 export type ComparisonDraftStatus =
   | "needs_confirmation"
@@ -148,6 +154,7 @@ export interface PurchaseConstraints {
 export interface ComparisonSearchTerms {
   jd: string[];
   zkh: string[];
+  ehsy?: string[];
 }
 
 export interface ComparisonStructure {

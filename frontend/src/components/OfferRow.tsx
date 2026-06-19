@@ -1,11 +1,6 @@
 import { useState, type CSSProperties } from "react";
-import { ExternalOffer } from "../types";
+import { ExternalOffer, PLATFORM_LABELS } from "../types";
 import { submitExternalOfferFeedback } from "../services/api";
-
-const PLATFORM_LABELS: Record<string, string> = {
-  jd: "京东工业品",
-  zkh: "震坤行",
-};
 
 interface Props {
   offer: ExternalOffer;

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ComparisonDraft, ExtensionPairingCode, ExtensionStatus } from "../types";
+import { ComparisonDraft, ExtensionPairingCode, ExtensionStatus, PLATFORM_LABELS } from "../types";
 import type { CSSProperties } from "react";
 import { createExtensionPairingCode, getExtensionStatus } from "../services/api";
 
@@ -8,11 +8,6 @@ interface Props {
   disabled?: boolean;
   onStart?: () => void;
 }
-
-const PLATFORM_LABELS: Record<string, string> = {
-  jd: "京东工业品",
-  zkh: "震坤行",
-};
 
 export default function ComparisonDraftCard({ draft, disabled, onStart }: Props) {
   const [extensionStatus, setExtensionStatus] = useState<ExtensionStatus | null>(null);

@@ -1,5 +1,5 @@
 import { useState, type CSSProperties } from "react";
-import { ComparisonPlatform, ComparisonSubtask, ComparisonTask, ExternalOffer } from "../types";
+import { ComparisonPlatform, ComparisonSubtask, ComparisonTask, ExternalOffer, PLATFORM_LABELS } from "../types";
 import OfferRow from "./OfferRow";
 
 interface Props {
@@ -8,11 +8,6 @@ interface Props {
   onRefresh?: () => void;
   onRetryPlatform?: (platform: ComparisonPlatform) => void;
 }
-
-const PLATFORM_LABELS: Record<ComparisonPlatform, string> = {
-  jd: "京东工业品",
-  zkh: "震坤行",
-};
 
 const STATUS_LABELS: Record<string, string> = {
   queued: "排队中",
