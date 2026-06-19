@@ -61,7 +61,7 @@ export default function ComparisonDraftCard({ draft, disabled, onStart }: Props)
             外部平台比价草稿
           </div>
           <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 3 }}>
-            确认结构后查询京东工业品和震坤行；本库 SKU 不参与展示。
+            确认结构后查询京东工业品、震坤行和西域；本库 SKU 不参与展示。
           </div>
         </div>
         <span style={{

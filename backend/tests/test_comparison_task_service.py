@@ -651,6 +651,46 @@ async def test_inject_ehsy_swallows_failure(monkeypatch):
     assert inserted["n"] == 0
 
 
+@pytest.mark.asyncio
+async def test_start_draft_calls_inject_ehsy_when_ehsy_in_platforms(monkeypatch):
+    """接线保护：selected_platforms 含 ehsy 时 start_draft 必须调用 _inject_ehsy_subtask。
+
+    spy 记录调用参数；如有人删掉 start_draft 里的 ehsy 调用点，本测试即刻红灯。
+    """
+    # 在 fake_db 已有的 ("draft-1", 7) 旁边，再注入一条含 ehsy 的草稿。
+    FakeSession.drafts[("draft-ehsy", 7)] = (
+        "draft-ehsy",
+        json.dumps(["jd", "zkh", "ehsy"]),
+        json.dumps({"jd": ["螺栓 M8"], "zkh": ["螺栓 M8"]}),
+        _structure_json(),
+    )
+
+    async def fake_status(user_id):
+        return ExtensionStatus(
+            online=True,
+            platforms=[
+                PlatformStatus(platform="jd", loggedIn=True),
+                PlatformStatus(platform="zkh", loggedIn=True),
+            ],
+        )
+
+    monkeypatch.setattr(comparison_task_service.extension_service, "get_extension_status", fake_status)
+
+    injected_calls: list[dict] = []
+
+    async def spy_inject(task_id, user_id, structure, search_terms):
+        injected_calls.append({"task_id": task_id, "user_id": user_id, "search_terms": search_terms})
+
+    monkeypatch.setattr(comparison_task_service, "_inject_ehsy_subtask", spy_inject)
+
+    task = await comparison_task_service.start_draft("draft-ehsy", "u7")
+
+    assert task is not None, "start_draft 应返回 task dict"
+    assert len(injected_calls) == 1, f"_inject_ehsy_subtask 应被调用一次，实际 {len(injected_calls)} 次"
+    assert injected_calls[0]["task_id"] == task["id"]
+    assert injected_calls[0]["search_terms"] == {"jd": ["螺栓 M8"], "zkh": ["螺栓 M8"]}
+
+
 def _seed_running_subtask():
     FakeSession.tasks["task-1"] = {
         "id": "task-1",
