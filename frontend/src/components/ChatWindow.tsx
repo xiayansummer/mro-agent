@@ -157,6 +157,12 @@ export default function ChatWindow({ sessionId, messages, onMessagesChange, onTo
           );
           updateMessages(next);
         },
+        onRefinedOffers: (r) => {
+          const next = messagesRef.current.map((m) =>
+            m.id === assistantMsgId ? { ...m, refinedOffers: r } : m
+          );
+          updateMessages(next);
+        },
         onThinking: (status) => {
           const next = messagesRef.current.map((m) =>
             m.id === assistantMsgId && m.content === "" ? { ...m, thinkingStatus: status } : m

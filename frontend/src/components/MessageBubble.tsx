@@ -6,6 +6,7 @@ import SkuCard from "./SkuCard";
 import SlotClarificationCard from "./SlotClarificationCard";
 import ComparisonDraftCard from "./ComparisonDraftCard";
 import ComparisonTaskCard from "./ComparisonTaskCard";
+import RefinedOffersCard from "./RefinedOffersCard";
 import { ComparisonTask } from "../types";
 
 interface Props {
@@ -140,6 +141,12 @@ export default function MessageBubble({
               onRefresh={() => onComparisonRefresh?.(message.id, message.comparisonTask!.id)}
               onRetryPlatform={(platform) => onComparisonRetry?.(message.id, message.comparisonTask!.id, platform)}
             />
+          </div>
+        )}
+
+        {message.refinedOffers && (
+          <div style={{ marginBottom: 12 }}>
+            <RefinedOffersCard data={message.refinedOffers} sessionId={sessionId} />
           </div>
         )}
 

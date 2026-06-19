@@ -40,6 +40,7 @@ export interface ChatMessage {
   slotClarification?: SlotClarification;
   comparisonDraft?: ComparisonDraft;
   comparisonTask?: ComparisonTask;
+  refinedOffers?: { sourceProductType: string; operationLabel: string; offers: ExternalOffer[]; note?: string };
 }
 
 export interface SlotMissing {

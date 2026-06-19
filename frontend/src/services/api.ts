@@ -5,6 +5,7 @@ import {
   SlotClarification,
   ComparisonDraft,
   ComparisonTask,
+  ChatMessage,
   ExtensionPairingCode,
   ExtensionStatus,
 } from "../types";
@@ -71,6 +72,7 @@ export interface SSECallbacks {
   onCompetitorResults: (results: CompetitorItem[]) => void;
   onSlotClarification?: (slot: SlotClarification) => void;
   onComparisonDraft?: (draft: ComparisonDraft) => void;
+  onRefinedOffers?: (r: NonNullable<ChatMessage["refinedOffers"]>) => void;
   onThinking: (msg: string) => void;
   onDone: () => void;
   onError: (err: string) => void;
@@ -152,6 +154,9 @@ export async function sendMessage(
         } catch (e) {
           console.error("Failed to parse comparison_draft:", e);
         }
+        break;
+      case "refined_offers":
+        try { callbacks.onRefinedOffers?.(JSON.parse(data)); } catch (e) { console.error("refined_offers parse", e); }
         break;
       case "thinking":
         callbacks.onThinking(data);
