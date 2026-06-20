@@ -175,3 +175,44 @@ async def test_handle_message_keeps_slot_summary_in_hot_context(monkeypatch):
     assistant_context = [item["content"] for item in context if item["role"] == "assistant"]
     assert any("美和品牌的手拉葫芦" in item for item in assistant_context)
     assert any("需要多大起升高度" in item for item in assistant_context)
+
+
+def test_slot_followup_text_plain_on_first_clarify():
+    """首次追问(历史无追问记录):常规文案,不打扰、不提开新会话。"""
+    text = agent._slot_followup_text([{"role": "user", "content": "美和手拉葫芦"}])
+    assert "重新描述" not in text
+    assert "确认" in text
+
+
+def test_slot_followup_text_guides_on_repeated_clarify():
+    """同一会话已追问过一次(历史含'待确认参数'),本轮是第≥2次:主动引导开新会话。"""
+    conv = [
+        {"role": "user", "content": "美和手拉葫芦"},
+        {"role": "assistant", "content": "待确认参数:需要采购美和品牌的手拉葫芦;已知参数:品牌:美和"},
+        {"role": "user", "content": "3米"},
+    ]
+    text = agent._slot_followup_text(conv)
+    assert "重新描述" in text
+
+
+@pytest.mark.asyncio
+async def test_handle_message_guides_to_new_session_on_repeated_clarify(monkeypatch):
+    """端到端:连续两轮都触发 slot 追问时,第二轮的 text 事件应带开新会话引导。"""
+    async def fake_user_context(user_id, limit):
+        return ""
+
+    async def fake_create_draft(**kwargs):
+        return {
+            "shouldCreateDraft": False,
+            "parsedIntent": {"query_type": "vague"},
+            "slotClarification": {"summary": "需要采购口罩", "known": [], "missing": []},
+        }
+
+    monkeypatch.setattr(agent.memory_service, "get_user_context", fake_user_context)
+    monkeypatch.setattr(agent.comparison_draft_service, "create_draft_from_message", fake_create_draft)
+
+    _ = [chunk async for chunk in agent.handle_message("s-rep", "口罩", "u1")]
+    chunks2 = [chunk async for chunk in agent.handle_message("s-rep", "防尘的", "u1")]
+
+    text_events = "".join(c for c in chunks2 if "event: text" in c)
+    assert "重新描述" in text_events

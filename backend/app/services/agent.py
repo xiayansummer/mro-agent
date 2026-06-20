@@ -35,6 +35,32 @@ def _slot_context_summary(slot: dict) -> str:
     return "待确认参数：" + "；".join(parts) if parts else "待确认参数"
 
 
+# 同一会话反复追问的阈值:本轮之前已追问 ≥ 此值,就主动引导开新会话。
+_REPEAT_CLARIFY_THRESHOLD = 1
+
+
+def _slot_followup_text(conversation: list[dict]) -> str:
+    """slot 追问时回给用户的提示文案。
+
+    多轮"无缝追问"会概率性地把历史尝试的品牌/规格累积进检索结构(LLM 非确定,已复现),
+    让用户陷在"追问→继续→又追问/搜空"的循环里出不来。这里数本会话此前已追问过几次
+    (以"待确认参数"开头的 assistant 历史),反复追问(≥阈值)时主动引导用户用追问卡片上的
+    「🔄 重新描述需求」开新会话、清空被污染的上下文——这是跳出污染循环的确定性出口。
+    """
+    prior_clarify = sum(
+        1
+        for m in conversation
+        if m.get("role") == "assistant"
+        and str(m.get("content", "")).startswith("待确认参数")
+    )
+    if prior_clarify >= _REPEAT_CLARIFY_THRESHOLD:
+        return (
+            "几轮下来还没锁定合适的产品，可能受了前面对话信息的干扰。"
+            "建议点下方「🔄 重新描述需求」开个新会话，把品类、规格、品牌、数量一次说清，这样检索最准。"
+        )
+    return "请先通过上方卡片确认关键参数，确认后我再查询京东工业品和震坤行。"
+
+
 # In-memory session store for hot multi-turn conversations.
 # DB chat history is the source of truth for cold starts / multi-replica traffic.
 # 用 OrderedDict 做 LRU:超过 _MAX_SESSIONS 淘汰最久未用的,防无界增长。
@@ -150,7 +176,8 @@ async def handle_message(
     slot_clarification = result.get("slotClarification")
     if slot_clarification:
         yield "event: slot_clarification\ndata: " + json.dumps(slot_clarification, ensure_ascii=False) + "\n\n"
-        text = "请先通过上方卡片确认关键参数，确认后我再查询京东工业品和震坤行。"
+        # 反复追问时引导开新会话(此处 ctx["conversation"] 尚未含本轮,数的是此前的追问次数)
+        text = _slot_followup_text(ctx["conversation"])
         yield f"event: text\ndata: {json.dumps(text, ensure_ascii=False)}\n\n"
         ctx["conversation"].append({"role": "user", "content": user_message})
         ctx["conversation"].append({"role": "assistant", "content": _slot_context_summary(slot_clarification)})

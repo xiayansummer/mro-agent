@@ -5,6 +5,8 @@ interface Props {
   slot: SlotClarification;
   disabled?: boolean;       // true when submitted (read-only)
   onSubmit: (composedText: string) => void;
+  /** 反复追问陷在被污染的上下文里时,一键开新会话重新描述需求的出口 */
+  onNewComparison?: () => void;
 }
 
 /** Strip trailing "(N)" count suffix from chip text before submission. */
@@ -12,7 +14,7 @@ function cleanChipText(s: string): string {
   return s.replace(/\s*\(\d+\)$/, "");
 }
 
-export default function SlotClarificationCard({ slot, disabled = false, onSubmit }: Props) {
+export default function SlotClarificationCard({ slot, disabled = false, onSubmit, onNewComparison }: Props) {
   // selected: { dimension key → chosen option text }
   const [selected, setSelected] = useState<Record<string, string>>({});
   const [freeText, setFreeText] = useState("");
@@ -228,6 +230,25 @@ export default function SlotClarificationCard({ slot, disabled = false, onSubmit
               直接检索
             </button>
           </div>
+        </div>
+      )}
+
+      {onNewComparison && (
+        <div style={{ borderTop: "1px solid var(--border)", paddingTop: 8, marginTop: 10, textAlign: "center" }}>
+          <button
+            onClick={onNewComparison}
+            title="开一个新会话,清空上下文重新描述需求,避免上轮信息干扰"
+            style={{
+              background: "none",
+              border: "none",
+              color: "var(--text-muted)",
+              cursor: "pointer",
+              fontSize: 12,
+              padding: "2px 8px",
+            }}
+          >
+            🔄 重新描述需求（开新会话）
+          </button>
         </div>
       )}
     </div>

@@ -121,6 +121,7 @@ export default function MessageBubble({
               slot={message.slotClarification}
               disabled={!!message.slotClarification.submitted}
               onSubmit={(text) => onChipSubmit?.(text)}
+              onNewComparison={onNewComparison}
             />
           </div>
         )}
