@@ -1,5 +1,8 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { authHeader } from "../services/auth";
+import { compareInquiryRow, getComparisonTask } from "../services/api";
+import ComparisonTaskCard from "./ComparisonTaskCard";
+import { ComparisonTask } from "../types";
 
 interface InquiryRow {
   index: number;
@@ -7,6 +10,7 @@ interface InquiryRow {
   matches: SkuMatch[];
   match_count: number;
   matched: boolean;
+  compareTaskId?: string;  // 已触发外部比价的 taskId,持久化用于关页面重开接回
 }
 
 interface SkuMatch {
@@ -94,6 +98,17 @@ export default function InquiryPage({ onToggleSidebar }: { onToggleSidebar?: () 
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
   const fileRef = useRef<HTMLInputElement>(null);
 
+  // 行外部比价状态:rowIndex → { taskId, task, loading, error }
+  interface RowCompare {
+    taskId: string;
+    task: ComparisonTask | null;
+    loading: boolean;
+    error?: string;
+  }
+  const [rowCompare, setRowCompare] = useState<Map<number, RowCompare>>(new Map());
+  const rowCompareRef = useRef(rowCompare);
+  useEffect(() => { rowCompareRef.current = rowCompare; }, [rowCompare]);
+
   useEffect(() => { saveHistory(history); }, [history]);
 
   const deleteHistory = useCallback((id: string) => {
@@ -162,6 +177,31 @@ export default function InquiryPage({ onToggleSidebar }: { onToggleSidebar?: () 
       return next;
     });
   };
+
+  const persistCompareTaskId = useCallback((_idx: number, _taskId: string) => {
+    // Task 5 补全:写入 result.rows[idx].compareTaskId + 同步 history + saveHistory
+  }, []);
+
+  const handleCompareRow = useCallback(async (row: InquiryRow) => {
+    // 强制展开该行(库内无匹配的行也能看外部结果)
+    setExpandedRows((prev) => new Set(prev).add(row.index));
+    setRowCompare((prev) => new Map(prev).set(row.index, { taskId: "", task: null, loading: true }));
+    try {
+      const resp = await compareInquiryRow(row.input);
+      if (!resp.ok || !resp.taskId) {
+        setRowCompare((prev) => new Map(prev).set(row.index, {
+          taskId: "", task: null, loading: false, error: resp.guidance || "无法比价",
+        }));
+        return;
+      }
+      setRowCompare((prev) => new Map(prev).set(row.index, { taskId: resp.taskId!, task: null, loading: false }));
+      persistCompareTaskId(row.index, resp.taskId!);
+    } catch {
+      setRowCompare((prev) => new Map(prev).set(row.index, {
+        taskId: "", task: null, loading: false, error: "比价启动失败,请重试",
+      }));
+    }
+  }, [persistCompareTaskId]);
 
   const accentColor = "var(--accent)";
   const borderColor = "var(--border)";
@@ -386,7 +426,7 @@ export default function InquiryPage({ onToggleSidebar }: { onToggleSidebar?: () 
             {/* Results table */}
             <div style={{ background: "var(--surface)", border: `1px solid ${borderColor}`, borderRadius: 10, overflow: "hidden" }}>
               {/* Table header */}
-              <div style={{ display: "grid", gridTemplateColumns: "50px 1fr 100px 130px 80px 60px", gap: 0, background: "#f8f9fb", borderBottom: `1px solid ${borderColor}`, padding: "10px 16px", fontSize: 12, color: "var(--text-muted)", fontWeight: 500 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "50px 1fr 90px 110px 70px 96px", gap: 0, background: "#f8f9fb", borderBottom: `1px solid ${borderColor}`, padding: "10px 16px", fontSize: 12, color: "var(--text-muted)", fontWeight: 500 }}>
                 <span>#</span>
                 <span>需求品名 / 型号</span>
                 <span>品牌</span>
@@ -401,9 +441,9 @@ export default function InquiryPage({ onToggleSidebar }: { onToggleSidebar?: () 
                   <div key={row.index} style={{ borderBottom: `1px solid ${borderColor}` }}>
                     {/* Row summary */}
                     <div
-                      onClick={() => row.match_count > 0 && toggleRow(row.index)}
+                      onClick={() => (row.match_count > 0 || rowCompare.has(row.index)) && toggleRow(row.index)}
                       style={{
-                        display: "grid", gridTemplateColumns: "50px 1fr 100px 130px 80px 60px",
+                        display: "grid", gridTemplateColumns: "50px 1fr 90px 110px 70px 96px",
                         gap: 0, padding: "11px 16px", alignItems: "center",
                         cursor: row.match_count > 0 ? "pointer" : "default",
                         transition: "background 0.1s",
@@ -435,8 +475,20 @@ export default function InquiryPage({ onToggleSidebar }: { onToggleSidebar?: () 
                           </span>
                         )}
                       </span>
-                      <span style={{ display: "flex", justifyContent: "center" }}>
-                        {row.match_count > 0 && (
+                      <span style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 6 }}>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleCompareRow(row); }}
+                          disabled={rowCompare.get(row.index)?.loading}
+                          title="对该行触发京东/震坤行/西域外部比价"
+                          style={{
+                            border: "1px solid var(--border)", borderRadius: 6,
+                            background: "transparent", color: "var(--accent)",
+                            cursor: "pointer", fontSize: 11.5, padding: "3px 8px", whiteSpace: "nowrap",
+                          }}
+                        >
+                          🔍 比价
+                        </button>
+                        {(row.match_count > 0 || rowCompare.has(row.index)) && (
                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2" strokeLinecap="round" style={{ transform: expanded ? "rotate(180deg)" : "none", transition: "transform 0.2s" }}>
                             <path d="M6 9l6 6 6-6" />
                           </svg>
