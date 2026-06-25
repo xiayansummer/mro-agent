@@ -264,3 +264,27 @@ async function responseText(response: Response, fallback: string): Promise<strin
     return `${fallback}: ${response.status}`;
   }
 }
+
+export interface CompareRowResponse {
+  ok: boolean;
+  taskId?: string;
+  draftId?: string;
+  guidance?: string;
+}
+
+export async function compareInquiryRow(row: {
+  需求品名?: string;
+  需求品牌?: string;
+  需求型号?: string;
+}): Promise<CompareRowResponse> {
+  const response = await fetch(`${API_BASE}/inquiry/compare-row`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeader() },
+    body: JSON.stringify(row),
+  });
+  if (!response.ok) {
+    if (response.status === 401) window.dispatchEvent(new Event("mro:unauthorized"));
+    throw new Error(await responseText(response, "外部比价启动失败"));
+  }
+  return response.json();
+}
