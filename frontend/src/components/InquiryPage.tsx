@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { authHeader } from "../services/auth";
 import { compareInquiryRow, getComparisonTask } from "../services/api";
 import ComparisonTaskCard from "./ComparisonTaskCard";
@@ -108,6 +108,39 @@ export default function InquiryPage({ onToggleSidebar }: { onToggleSidebar?: () 
   const [rowCompare, setRowCompare] = useState<Map<number, RowCompare>>(new Map());
   const rowCompareRef = useRef(rowCompare);
   useEffect(() => { rowCompareRef.current = rowCompare; }, [rowCompare]);
+
+  // 仅当"活跃比价行集合"变化时重建轮询定时器,避免每次 setRowCompare 都重建
+  const activeCompareKey = useMemo(
+    () =>
+      Array.from(rowCompare.entries())
+        .filter(([, c]) => c.taskId && (!c.task || ["queued", "running", "partial"].includes(c.task.status)))
+        .map(([idx, c]) => `${idx}:${c.taskId}:${c.task?.status ?? "new"}`)
+        .join(","),
+    [rowCompare],
+  );
+
+  useEffect(() => {
+    if (!activeCompareKey) return;
+    const timer = window.setInterval(async () => {
+      const active = Array.from(rowCompareRef.current.entries()).filter(
+        ([, c]) => c.taskId && (!c.task || ["queued", "running", "partial"].includes(c.task.status)),
+      );
+      if (active.length === 0) return;
+      const updates = await Promise.allSettled(active.map(([, c]) => getComparisonTask(c.taskId)));
+      setRowCompare((prev) => {
+        const next = new Map(prev);
+        active.forEach(([idx], i) => {
+          const u = updates[i];
+          if (u.status === "fulfilled") {
+            const cur = next.get(idx);
+            if (cur) next.set(idx, { ...cur, task: u.value });
+          }
+        });
+        return next;
+      });
+    }, 2500);
+    return () => window.clearInterval(timer);
+  }, [activeCompareKey]);
 
   useEffect(() => { saveHistory(history); }, [history]);
 
@@ -496,22 +529,41 @@ export default function InquiryPage({ onToggleSidebar }: { onToggleSidebar?: () 
                       </span>
                     </div>
 
-                    {/* Expanded matches */}
-                    {expanded && row.matches.length > 0 && (
+                    {/* Expanded area: 库内匹配 + 外部比价 */}
+                    {expanded && (row.matches.length > 0 || rowCompare.has(row.index)) && (
                       <div style={{ background: "#f8f9fb", borderTop: `1px solid ${borderColor}`, padding: "8px 16px 12px 66px" }}>
-                        <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 8, fontFamily: "var(--mono)" }}>
-                          匹配结果（共 {row.match_count} 个，显示前 5）
-                        </div>
-                        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                          {row.matches.map((m) => (
-                            <div key={m.item_code} style={{ display: "grid", gridTemplateColumns: "110px 1fr 100px 120px", gap: 8, background: "var(--surface)", border: `1px solid ${borderColor}`, borderRadius: 6, padding: "8px 12px", fontSize: 12.5 }}>
-                              <span style={{ fontFamily: "var(--mono)", color: "var(--accent)", fontWeight: 500 }}>{m.item_code}</span>
-                              <span style={{ color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.item_name}</span>
-                              <span style={{ color: "var(--text-secondary)" }}>{m.brand_name || "—"}</span>
-                              <span style={{ color: "var(--text-muted)", fontFamily: "var(--mono)", fontSize: 11.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.specification || m.mfg_sku || "—"}</span>
+                        {row.matches.length > 0 && (
+                          <>
+                            <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 8, fontFamily: "var(--mono)" }}>
+                              库内匹配（共 {row.match_count} 个，显示前 5）
                             </div>
-                          ))}
-                        </div>
+                            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                              {row.matches.map((m) => (
+                                <div key={m.item_code} style={{ display: "grid", gridTemplateColumns: "110px 1fr 100px 120px", gap: 8, background: "var(--surface)", border: `1px solid ${borderColor}`, borderRadius: 6, padding: "8px 12px", fontSize: 12.5 }}>
+                                  <span style={{ fontFamily: "var(--mono)", color: "var(--accent)", fontWeight: 500 }}>{m.item_code}</span>
+                                  <span style={{ color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.item_name}</span>
+                                  <span style={{ color: "var(--text-secondary)" }}>{m.brand_name || "—"}</span>
+                                  <span style={{ color: "var(--text-muted)", fontFamily: "var(--mono)", fontSize: 11.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.specification || m.mfg_sku || "—"}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </>
+                        )}
+
+                        {rowCompare.has(row.index) && (
+                          <div style={{ marginTop: row.matches.length > 0 ? 14 : 0 }}>
+                            <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 8, fontFamily: "var(--mono)" }}>
+                              外部比价（京东 / 震坤行 / 西域）
+                            </div>
+                            {(() => {
+                              const rc = rowCompare.get(row.index)!;
+                              if (rc.loading) return <div style={{ fontSize: 12.5, color: "var(--text-muted)" }}>正在发起外部比价…</div>;
+                              if (rc.error) return <div style={{ fontSize: 12.5, color: "#b45309" }}>{rc.error}</div>;
+                              if (rc.task) return <ComparisonTaskCard task={rc.task} />;
+                              return <div style={{ fontSize: 12.5, color: "var(--text-muted)" }}>正在查询…</div>;
+                            })()}
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
