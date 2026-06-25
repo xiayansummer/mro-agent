@@ -1,12 +1,13 @@
 """
 批量询价路由
-POST /api/inquiry/upload  — 上传 Excel/CSV，批量匹配 SKU，返回结构化结果
-GET  /api/inquiry/template — 下载询价模板
+POST /api/inquiry/upload      — 上传 Excel/CSV，解析为结构化行(不做库内匹配)
+POST /api/inquiry/compare-row — 对一行需求触发三平台外部比价(京东/震坤行/西域)
+GET  /api/inquiry/template    — 下载询价模板
 """
-import asyncio
 import io
 import csv
 import os
+import uuid
 from typing import Optional
 
 import openpyxl
@@ -14,11 +15,7 @@ import xlrd
 from fastapi import APIRouter, Body, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
-from app.db.mysql import AsyncSessionLocal
 from app.routers.auth import require_user_id
-from app.services.sku_search import search_skus, relaxed_search
-import uuid
-
 from app.services.comparison_structure import build_comparison_structure
 from app.services.comparison_draft_service import create_draft, _require_db_user_id
 from app.services.comparison_task_service import start_draft
@@ -26,7 +23,6 @@ from app.services.comparison_task_service import start_draft
 router = APIRouter()
 
 MAX_ROWS = 200
-CONCURRENCY = 8  # max parallel DB queries
 
 # ── Excel / CSV parsing ───────────────────────────────────────────────────────
 
@@ -103,40 +99,6 @@ def parse_excel_bytes(content: bytes, filename: str) -> list[dict]:
     return parse_rows_from_sheet(raw)
 
 
-# ── Batch SKU search ──────────────────────────────────────────────────────────
-
-def row_to_intent(row: dict) -> dict:
-    品名 = row.get("需求品名", "")
-    品牌 = row.get("需求品牌", "")
-    型号 = row.get("需求型号", "")
-
-    keywords = [kw.strip() for kw in 品名.split() if kw.strip()] if 品名 else []
-    # Split 型号 by common delimiters to extract spec tokens
-    import re
-    spec_tokens = re.split(r"[\s,，×x*×/]+", 型号) if 型号 else []
-    spec_keywords = [t for t in spec_tokens if t.strip()]
-
-    return {
-        "keywords": keywords,
-        "brand": 品牌 or None,
-        "spec_keywords": spec_keywords,
-    }
-
-
-async def search_one_row(db_session, row: dict, idx: int) -> dict:
-    intent = row_to_intent(row)
-    results = await search_skus(db_session, intent, limit=5)
-    if not results:
-        results = await relaxed_search(db_session, intent, limit=5)
-    return {
-        "index": idx + 1,
-        "input": row,
-        "matches": results,
-        "match_count": len(results),
-        "matched": len(results) > 0,
-    }
-
-
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.post("/inquiry/upload")
@@ -155,22 +117,11 @@ async def upload_inquiry(
             detail="未能识别到有效数据行。请确认文件包含「需求品名」「需求型号」等列标题。"
         )
 
-    # Batch search with bounded concurrency
-    semaphore = asyncio.Semaphore(CONCURRENCY)
-
-    async def search_with_sem(row, idx):
-        async with semaphore:
-            async with AsyncSessionLocal() as db:
-                return await search_one_row(db, row, idx)
-
-    results = await asyncio.gather(*[search_with_sem(row, i) for i, row in enumerate(rows)])
-
-    matched_count = sum(1 for r in results if r["matched"])
+    # 只解析为结构化行,不做库内匹配;外部比价由前端逐行调 /inquiry/compare-row
     return {
-        "total": len(results),
-        "matched": matched_count,
+        "total": len(rows),
         "filename": file.filename,
-        "rows": results,
+        "rows": [{"index": i + 1, "input": row} for i, row in enumerate(rows)],
     }
 
 

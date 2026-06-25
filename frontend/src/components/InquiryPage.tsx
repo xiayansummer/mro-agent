@@ -7,25 +7,11 @@ import { ComparisonTask } from "../types";
 interface InquiryRow {
   index: number;
   input: { 需求品名?: string; 需求品牌?: string; 需求型号?: string; 采购数量?: string };
-  matches: SkuMatch[];
-  match_count: number;
-  matched: boolean;
   compareTaskId?: string;  // 已触发外部比价的 taskId,持久化用于关页面重开接回
-}
-
-interface SkuMatch {
-  item_code: string;
-  item_name: string;
-  brand_name: string | null;
-  specification: string | null;
-  mfg_sku: string | null;
-  l2_category_name: string | null;
-  l3_category_name: string | null;
 }
 
 interface InquiryResult {
   total: number;
-  matched: number;
   filename: string;
   rows: InquiryRow[];
 }
@@ -34,7 +20,6 @@ interface HistoryEntry {
   id: string;
   filename: string;
   total: number;
-  matched: number;
   time: number;
   result: InquiryResult;
 }
@@ -62,21 +47,14 @@ function formatTime(ts: number) {
 }
 
 function downloadCSV(result: InquiryResult) {
-  const headers = ["行号", "需求品名", "需求品牌", "需求型号", "采购数量", "匹配数", "推荐编码", "推荐产品名", "推荐品牌", "推荐规格"];
-  const rows = result.rows.flatMap((row) => {
-    if (row.matches.length === 0) {
-      return [[row.index, row.input.需求品名 || "", row.input.需求品牌 || "", row.input.需求型号 || "", row.input.采购数量 || "", 0, "", "未找到匹配产品", "", ""]];
-    }
-    return row.matches.map((m, mi) => [
-      mi === 0 ? row.index : "",
-      mi === 0 ? row.input.需求品名 || "" : "",
-      mi === 0 ? row.input.需求品牌 || "" : "",
-      mi === 0 ? row.input.需求型号 || "" : "",
-      mi === 0 ? row.input.采购数量 || "" : "",
-      mi === 0 ? row.match_count : "",
-      m.item_code, m.item_name, m.brand_name || "", m.specification || "",
-    ]);
-  });
+  const headers = ["行号", "需求品名", "需求品牌", "需求型号", "采购数量"];
+  const rows = result.rows.map((row) => [
+    row.index,
+    row.input.需求品名 || "",
+    row.input.需求品牌 || "",
+    row.input.需求型号 || "",
+    row.input.采购数量 || "",
+  ]);
   const csv = [headers, ...rows].map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
   const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
@@ -108,6 +86,10 @@ export default function InquiryPage({ onToggleSidebar }: { onToggleSidebar?: () 
   const [rowCompare, setRowCompare] = useState<Map<number, RowCompare>>(new Map());
   // 当前展示的 result 对应的 history 条目 id,持久化 compareTaskId 时定位该条目
   const [currentHistoryId, setCurrentHistoryId] = useState<string>("");
+  const currentHistoryIdRef = useRef("");
+  useEffect(() => { currentHistoryIdRef.current = currentHistoryId; }, [currentHistoryId]);
+  // 自动批量比价函数的 ref(供 processFile 调用,规避 useCallback 定义顺序的 TDZ)
+  const autoCompareRowsRef = useRef<(rows: InquiryRow[], historyId: string) => void>(() => {});
   const rowCompareRef = useRef(rowCompare);
   useEffect(() => { rowCompareRef.current = rowCompare; }, [rowCompare]);
 
@@ -176,12 +158,15 @@ export default function InquiryPage({ onToggleSidebar }: { onToggleSidebar?: () 
       }
       const data: InquiryResult = await res.json();
       const entryId = Date.now().toString(36);
+      currentHistoryIdRef.current = entryId;
       setResult(data);
       setCurrentHistoryId(entryId);
       setHistory((h) => [
-        { id: entryId, filename: file.name, total: data.total, matched: data.matched, time: Date.now(), result: data },
+        { id: entryId, filename: file.name, total: data.total, time: Date.now(), result: data },
         ...h.slice(0, 19),
       ]);
+      // 解析完成后,自动对每行触发外部比价(限流并发)
+      autoCompareRowsRef.current(data.rows, entryId);
     } catch (e) {
       setError(e instanceof Error ? e.message : "上传失败，请重试");
     } finally {
@@ -215,7 +200,8 @@ export default function InquiryPage({ onToggleSidebar }: { onToggleSidebar?: () 
     });
   };
 
-  const persistCompareTaskId = useCallback((idx: number, taskId: string) => {
+  const persistCompareTaskId = useCallback((idx: number, taskId: string, historyId?: string) => {
+    const hid = historyId ?? currentHistoryIdRef.current;
     // 1) 更新当前 result 中该行的 compareTaskId
     setResult((prev) => {
       if (!prev) return prev;
@@ -225,14 +211,14 @@ export default function InquiryPage({ onToggleSidebar }: { onToggleSidebar?: () 
     // 2) 同步进 history 对应条目并落 localStorage(关页面后可恢复)
     setHistory((prev) => {
       const next = prev.map((e) =>
-        e.id === currentHistoryId
+        e.id === hid
           ? { ...e, result: { ...e.result, rows: e.result.rows.map((r) => (r.index === idx ? { ...r, compareTaskId: taskId } : r)) } }
           : e,
       );
       saveHistory(next);
       return next;
     });
-  }, [currentHistoryId]);
+  }, []);
 
   // result 设定后(upload 完成 / 从历史恢复),把已比价过的行重新挂上轮询接回结果
   useEffect(() => {
@@ -269,6 +255,45 @@ export default function InquiryPage({ onToggleSidebar }: { onToggleSidebar?: () 
     }
   }, [persistCompareTaskId]);
 
+  // 上传解析后,自动对每行触发外部比价(限流并发 4,缓解 jd/zkh 串行排队冲击)
+  const autoCompareRows = useCallback(async (rows: InquiryRow[], historyId: string) => {
+    const CONC = 4;
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < rows.length) {
+        const row = rows[cursor++];
+        setRowCompare((prev) => new Map(prev).set(row.index, { taskId: "", task: null, loading: true }));
+        try {
+          const resp = await compareInquiryRow(row.input);
+          if (!resp.ok || !resp.taskId) {
+            setRowCompare((prev) => new Map(prev).set(row.index, { taskId: "", task: null, loading: false, error: resp.guidance || "无法比价" }));
+            continue;
+          }
+          setRowCompare((prev) => new Map(prev).set(row.index, { taskId: resp.taskId!, task: null, loading: false }));
+          persistCompareTaskId(row.index, resp.taskId!, historyId);
+        } catch {
+          setRowCompare((prev) => new Map(prev).set(row.index, { taskId: "", task: null, loading: false, error: "比价启动失败" }));
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(CONC, rows.length) }, () => worker()));
+  }, [persistCompareTaskId]);
+  useEffect(() => { autoCompareRowsRef.current = autoCompareRows; }, [autoCompareRows]);
+
+  // 比价进度统计(顶部卡片)
+  const compareStats = useMemo(() => {
+    let priced = 0, running = 0;
+    rowCompare.forEach((c) => {
+      if (c.loading) { running += 1; return; }
+      if (c.task) {
+        const offers = c.task.subtasks?.reduce((n, s) => n + (s.items?.length || 0), 0) || 0;
+        if (offers > 0) priced += 1;
+        if (["queued", "running", "partial"].includes(c.task.status)) running += 1;
+      }
+    });
+    return { priced, running };
+  }, [rowCompare]);
+
   const accentColor = "var(--accent)";
   const borderColor = "var(--border)";
 
@@ -303,7 +328,7 @@ export default function InquiryPage({ onToggleSidebar }: { onToggleSidebar?: () 
         <div style={{ display: "flex", alignItems: "center", gap: 0, marginBottom: 24 }}>
           {[
             { n: 1, label: "上传询价单" },
-            { n: 2, label: "批量匹配" },
+            { n: 2, label: "批量比价" },
             { n: 3, label: "查看 / 导出结果" },
           ].map((step, i) => (
             <div key={step.n} style={{ display: "flex", alignItems: "center", flex: 1 }}>
@@ -424,7 +449,7 @@ export default function InquiryPage({ onToggleSidebar }: { onToggleSidebar?: () 
                         fontSize: 13.5, fontWeight: 500, cursor: pasteText.trim() ? "pointer" : "not-allowed",
                       }}
                     >
-                      开始匹配
+                      开始比价
                     </button>
                   </div>
                 </div>
@@ -441,7 +466,7 @@ export default function InquiryPage({ onToggleSidebar }: { onToggleSidebar?: () 
                 <span key={i} className="thinking-dot" style={{ animationDelay: `${i * 0.2}s` }} />
               ))}
             </div>
-            <p style={{ fontSize: 14, color: "var(--text-secondary)" }}>正在批量匹配产品，请稍候...</p>
+            <p style={{ fontSize: 14, color: "var(--text-secondary)" }}>正在解析询价单，请稍候...</p>
           </div>
         )}
 
@@ -464,12 +489,12 @@ export default function InquiryPage({ onToggleSidebar }: { onToggleSidebar?: () 
                   <span style={{ fontSize: 12, color: "var(--text-muted)" }}>总行数</span>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, background: "var(--surface)", border: `1px solid ${borderColor}`, borderRadius: 8, padding: "8px 16px" }}>
-                  <span style={{ fontSize: 22, fontWeight: 700, color: accentColor, fontFamily: "var(--mono)" }}>{result.matched}</span>
-                  <span style={{ fontSize: 12, color: "var(--text-muted)" }}>已匹配</span>
+                  <span style={{ fontSize: 22, fontWeight: 700, color: accentColor, fontFamily: "var(--mono)" }}>{compareStats.priced}</span>
+                  <span style={{ fontSize: 12, color: "var(--text-muted)" }}>已出价</span>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, background: "var(--surface)", border: `1px solid ${borderColor}`, borderRadius: 8, padding: "8px 16px" }}>
-                  <span style={{ fontSize: 22, fontWeight: 700, color: "#6b7280", fontFamily: "var(--mono)" }}>{result.total - result.matched}</span>
-                  <span style={{ fontSize: 12, color: "var(--text-muted)" }}>未匹配</span>
+                  <span style={{ fontSize: 22, fontWeight: 700, color: "#6b7280", fontFamily: "var(--mono)" }}>{compareStats.running}</span>
+                  <span style={{ fontSize: 12, color: "var(--text-muted)" }}>比价中</span>
                 </div>
               </div>
               <div style={{ display: "flex", gap: 8 }}>
@@ -492,12 +517,12 @@ export default function InquiryPage({ onToggleSidebar }: { onToggleSidebar?: () 
             {/* Results table */}
             <div style={{ background: "var(--surface)", border: `1px solid ${borderColor}`, borderRadius: 10, overflow: "hidden" }}>
               {/* Table header */}
-              <div style={{ display: "grid", gridTemplateColumns: "50px 1fr 90px 110px 70px 96px", gap: 0, background: "#f8f9fb", borderBottom: `1px solid ${borderColor}`, padding: "10px 16px", fontSize: 12, color: "var(--text-muted)", fontWeight: 500 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "50px 1fr 90px 90px 110px 96px", gap: 0, background: "#f8f9fb", borderBottom: `1px solid ${borderColor}`, padding: "10px 16px", fontSize: 12, color: "var(--text-muted)", fontWeight: 500 }}>
                 <span>#</span>
                 <span>需求品名 / 型号</span>
                 <span>品牌</span>
                 <span>采购数量</span>
-                <span>匹配数</span>
+                <span>比价状态</span>
                 <span></span>
               </div>
 
@@ -507,14 +532,14 @@ export default function InquiryPage({ onToggleSidebar }: { onToggleSidebar?: () 
                   <div key={row.index} style={{ borderBottom: `1px solid ${borderColor}` }}>
                     {/* Row summary */}
                     <div
-                      onClick={() => (row.match_count > 0 || rowCompare.has(row.index)) && toggleRow(row.index)}
+                      onClick={() => toggleRow(row.index)}
                       style={{
-                        display: "grid", gridTemplateColumns: "50px 1fr 90px 110px 70px 96px",
+                        display: "grid", gridTemplateColumns: "50px 1fr 90px 90px 110px 96px",
                         gap: 0, padding: "11px 16px", alignItems: "center",
-                        cursor: row.match_count > 0 ? "pointer" : "default",
+                        cursor: "pointer",
                         transition: "background 0.1s",
                       }}
-                      onMouseEnter={e => { if (row.match_count > 0) e.currentTarget.style.background = "#f8f9fb"; }}
+                      onMouseEnter={e => { e.currentTarget.style.background = "#f8f9fb"; }}
                       onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
                     >
                       <span style={{ fontSize: 12, color: "var(--text-muted)", fontFamily: "var(--mono)" }}>{row.index}</span>
@@ -531,72 +556,52 @@ export default function InquiryPage({ onToggleSidebar }: { onToggleSidebar?: () 
                       <span style={{ fontSize: 12.5, color: "var(--text-secondary)" }}>{row.input.需求品牌 || "—"}</span>
                       <span style={{ fontSize: 12.5, color: "var(--text-secondary)" }}>{row.input.采购数量 || "—"}</span>
                       <span>
-                        {row.matched ? (
-                          <span style={{ display: "inline-flex", alignItems: "center", gap: 4, background: "#dcfce7", color: "#15803d", borderRadius: 12, padding: "2px 8px", fontSize: 12, fontWeight: 500 }}>
-                            {row.match_count} 个
-                          </span>
-                        ) : (
-                          <span style={{ display: "inline-flex", alignItems: "center", gap: 4, background: "#f3f4f6", color: "#9ca3af", borderRadius: 12, padding: "2px 8px", fontSize: 12 }}>
-                            未找到
-                          </span>
-                        )}
+                        {(() => {
+                          const rc = rowCompare.get(row.index);
+                          const badge = (bg: string, color: string, text: string) => (
+                            <span style={{ display: "inline-flex", alignItems: "center", gap: 4, background: bg, color, borderRadius: 12, padding: "2px 8px", fontSize: 12, fontWeight: 500 }}>{text}</span>
+                          );
+                          if (!rc) return badge("#f3f4f6", "#9ca3af", "待比价");
+                          if (rc.loading) return badge("#fef3c7", "#b45309", "发起中…");
+                          if (rc.error) return badge("#fee2e2", "#b91c1c", "失败");
+                          const offers = rc.task?.subtasks?.reduce((n, s) => n + (s.items?.length || 0), 0) || 0;
+                          const running = rc.task ? ["queued", "running", "partial"].includes(rc.task.status) : true;
+                          if (offers > 0) return badge("#dcfce7", "#15803d", running ? `${offers} 报价·更新中` : `${offers} 报价`);
+                          return badge("#fef3c7", "#b45309", running ? "比价中…" : "无报价");
+                        })()}
                       </span>
                       <span style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 6 }}>
                         <button
                           onClick={(e) => { e.stopPropagation(); handleCompareRow(row); }}
                           disabled={rowCompare.get(row.index)?.loading}
-                          title="对该行触发京东/震坤行/西域外部比价"
+                          title="重新对该行触发京东/震坤行/西域外部比价"
                           style={{
                             border: "1px solid var(--border)", borderRadius: 6,
                             background: "transparent", color: "var(--accent)",
                             cursor: "pointer", fontSize: 11.5, padding: "3px 8px", whiteSpace: "nowrap",
                           }}
                         >
-                          🔍 比价
+                          🔄 重比
                         </button>
-                        {(row.match_count > 0 || rowCompare.has(row.index)) && (
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2" strokeLinecap="round" style={{ transform: expanded ? "rotate(180deg)" : "none", transition: "transform 0.2s" }}>
-                            <path d="M6 9l6 6 6-6" />
-                          </svg>
-                        )}
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2" strokeLinecap="round" style={{ transform: expanded ? "rotate(180deg)" : "none", transition: "transform 0.2s" }}>
+                          <path d="M6 9l6 6 6-6" />
+                        </svg>
                       </span>
                     </div>
 
-                    {/* Expanded area: 库内匹配 + 外部比价 */}
-                    {expanded && (row.matches.length > 0 || rowCompare.has(row.index)) && (
+                    {/* Expanded area: 外部比价结果 */}
+                    {expanded && (
                       <div style={{ background: "#f8f9fb", borderTop: `1px solid ${borderColor}`, padding: "8px 16px 12px 66px" }}>
-                        {row.matches.length > 0 && (
-                          <>
-                            <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 8, fontFamily: "var(--mono)" }}>
-                              库内匹配（共 {row.match_count} 个，显示前 5）
-                            </div>
-                            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                              {row.matches.map((m) => (
-                                <div key={m.item_code} style={{ display: "grid", gridTemplateColumns: "110px 1fr 100px 120px", gap: 8, background: "var(--surface)", border: `1px solid ${borderColor}`, borderRadius: 6, padding: "8px 12px", fontSize: 12.5 }}>
-                                  <span style={{ fontFamily: "var(--mono)", color: "var(--accent)", fontWeight: 500 }}>{m.item_code}</span>
-                                  <span style={{ color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.item_name}</span>
-                                  <span style={{ color: "var(--text-secondary)" }}>{m.brand_name || "—"}</span>
-                                  <span style={{ color: "var(--text-muted)", fontFamily: "var(--mono)", fontSize: 11.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.specification || m.mfg_sku || "—"}</span>
-                                </div>
-                              ))}
-                            </div>
-                          </>
-                        )}
-
-                        {rowCompare.has(row.index) && (
-                          <div style={{ marginTop: row.matches.length > 0 ? 14 : 0 }}>
-                            <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 8, fontFamily: "var(--mono)" }}>
-                              外部比价（京东 / 震坤行 / 西域）
-                            </div>
-                            {(() => {
-                              const rc = rowCompare.get(row.index)!;
-                              if (rc.loading) return <div style={{ fontSize: 12.5, color: "var(--text-muted)" }}>正在发起外部比价…</div>;
-                              if (rc.error) return <div style={{ fontSize: 12.5, color: "#b45309" }}>{rc.error}</div>;
-                              if (rc.task) return <ComparisonTaskCard task={rc.task} />;
-                              return <div style={{ fontSize: 12.5, color: "var(--text-muted)" }}>正在查询…</div>;
-                            })()}
-                          </div>
-                        )}
+                        <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 8, fontFamily: "var(--mono)" }}>
+                          外部比价（京东 / 震坤行 / 西域）
+                        </div>
+                        {(() => {
+                          const rc = rowCompare.get(row.index);
+                          if (!rc || (rc.loading && !rc.task)) return <div style={{ fontSize: 12.5, color: "var(--text-muted)" }}>正在发起外部比价…</div>;
+                          if (rc.error) return <div style={{ fontSize: 12.5, color: "#b45309" }}>{rc.error}</div>;
+                          if (rc.task) return <ComparisonTaskCard task={rc.task} />;
+                          return <div style={{ fontSize: 12.5, color: "var(--text-muted)" }}>正在查询…</div>;
+                        })()}
                       </div>
                     )}
                   </div>
@@ -627,14 +632,14 @@ export default function InquiryPage({ onToggleSidebar }: { onToggleSidebar?: () 
               </button>
             </div>
             <div style={{ background: "var(--surface)", border: `1px solid ${borderColor}`, borderRadius: 10, overflow: "hidden" }}>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 70px 70px 70px 130px 110px", gap: 0, background: "#f8f9fb", borderBottom: `1px solid ${borderColor}`, padding: "9px 16px", fontSize: 12, color: "var(--text-muted)", fontWeight: 500 }}>
-                <span>文件名称</span><span>总行数</span><span>已匹配</span><span>未匹配</span><span>时间</span><span>操作</span>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 80px 150px 130px", gap: 0, background: "#f8f9fb", borderBottom: `1px solid ${borderColor}`, padding: "9px 16px", fontSize: 12, color: "var(--text-muted)", fontWeight: 500 }}>
+                <span>文件名称</span><span>总行数</span><span>时间</span><span>操作</span>
               </div>
               {history.map((h, hi) => (
                 <div
                   key={h.id}
                   style={{
-                    display: "grid", gridTemplateColumns: "1fr 70px 70px 70px 130px 110px",
+                    display: "grid", gridTemplateColumns: "1fr 80px 150px 130px",
                     gap: 0, padding: "10px 16px",
                     borderBottom: hi < history.length - 1 ? `1px solid ${borderColor}` : "none",
                     alignItems: "center", fontSize: 13,
@@ -650,8 +655,6 @@ export default function InquiryPage({ onToggleSidebar }: { onToggleSidebar?: () 
                     <span style={{ color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{h.filename}</span>
                   </div>
                   <span style={{ color: "var(--text-secondary)", fontFamily: "var(--mono)", fontSize: 12.5 }}>{h.total}</span>
-                  <span style={{ color: "#15803d", fontFamily: "var(--mono)", fontSize: 12.5, fontWeight: 500 }}>{h.matched}</span>
-                  <span style={{ color: "#9ca3af", fontFamily: "var(--mono)", fontSize: 12.5 }}>{h.total - h.matched}</span>
                   <span style={{ color: "var(--text-muted)", fontSize: 11.5 }}>{formatTime(h.time)}</span>
                   <div style={{ display: "flex", gap: 4 }}>
                     <button
