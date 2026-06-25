@@ -11,12 +11,17 @@ from typing import Optional
 
 import openpyxl
 import xlrd
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Body, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
 from app.db.mysql import AsyncSessionLocal
 from app.routers.auth import require_user_id
 from app.services.sku_search import search_skus, relaxed_search
+import uuid
+
+from app.services.comparison_structure import build_comparison_structure
+from app.services.comparison_draft_service import create_draft, _require_db_user_id
+from app.services.comparison_task_service import start_draft
 
 router = APIRouter()
 
@@ -180,3 +185,38 @@ async def download_template():
         media_type="application/vnd.ms-excel",
         filename="询价选型模板.xls",
     )
+
+
+@router.post("/inquiry/compare-row")
+async def compare_inquiry_row(
+    row: dict = Body(...),
+    user_id: str = Depends(require_user_id),
+):
+    """对询价表的一行需求,按需触发一次三平台外部比价(京东/震坤行/西域)。
+
+    复用现有比价流程:拼 query → build_comparison_structure(空上下文+不追问)
+    → create_draft(inquiry- 前缀 session,不写 t_chat_message、不污染对话历史)
+    → start_draft。返回 taskId,前端轮询 GET /api/comparison/tasks/{taskId}。
+    """
+    品名 = (row.get("需求品名") or "").strip()
+    品牌 = (row.get("需求品牌") or "").strip()
+    型号 = (row.get("需求型号") or "").strip()
+    query = " ".join(p for p in [品牌, 品名, 型号] if p)
+    if not query:
+        return {"ok": False, "guidance": "该行无品名,无法外部比价"}
+
+    result = await build_comparison_structure(
+        query, conversation_context=[], memory_context="", skip_clarification=True
+    )
+    if not result.shouldCreateDraft or not result.structure:
+        return {"ok": False, "guidance": result.guidance or "该行需求过于宽泛,无法外部比价,请补充品名/型号"}
+
+    db_user_id = _require_db_user_id(user_id)
+    session_id = f"inquiry-{db_user_id}-{uuid.uuid4().hex}"
+    draft = await create_draft(
+        user_id=user_id, session_id=session_id, raw_query=query, structure=result.structure
+    )
+    task = await start_draft(draft["id"], user_id)
+    if not task:
+        return {"ok": False, "guidance": "比价任务创建失败,请重试"}
+    return {"ok": True, "taskId": task["id"], "draftId": draft["id"]}
