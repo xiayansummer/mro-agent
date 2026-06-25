@@ -46,21 +46,13 @@ function formatTime(ts: number) {
   return new Date(ts).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
-function downloadCSV(result: InquiryResult) {
-  const headers = ["行号", "需求品名", "需求品牌", "需求型号", "采购数量"];
-  const rows = result.rows.map((row) => [
-    row.index,
-    row.input.需求品名 || "",
-    row.input.需求品牌 || "",
-    row.input.需求型号 || "",
-    row.input.采购数量 || "",
-  ]);
+function downloadCSV(headers: (string | number)[], rows: (string | number)[][], filename: string) {
   const csv = [headers, ...rows].map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
   const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `询价结果_${result.filename.replace(/\.[^.]+$/, "")}.csv`;
+  a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -294,6 +286,24 @@ export default function InquiryPage({ onToggleSidebar }: { onToggleSidebar?: () 
     return { priced, running };
   }, [rowCompare]);
 
+  // 导出当前结果的三平台比价(每个报价一行;无报价的行输出一行占位)
+  const handleExportCSV = useCallback(() => {
+    if (!result) return;
+    const PLAT: Record<string, string> = { jd: "京东工业品", zkh: "震坤行", ehsy: "西域" };
+    const headers = ["行号", "需求品名", "需求品牌", "需求型号", "采购数量", "比价平台", "商品标题", "品牌", "价格", "单位", "货期", "链接"];
+    const lines: (string | number)[][] = result.rows.flatMap((row) => {
+      const base: (string | number)[] = [row.input.需求品名 || "", row.input.需求品牌 || "", row.input.需求型号 || "", row.input.采购数量 || ""];
+      const rc = rowCompare.get(row.index);
+      const offers = (rc?.task?.subtasks || []).flatMap((s) => (s.items || []).map((o) => ({ o, plat: s.platform as string })));
+      if (offers.length === 0) return [[row.index, ...base, "", "无报价", "", "", "", "", ""]];
+      return offers.map(({ o, plat }, oi) => [
+        oi === 0 ? row.index : "", oi === 0 ? base[0] : "", oi === 0 ? base[1] : "", oi === 0 ? base[2] : "", oi === 0 ? base[3] : "",
+        PLAT[plat] || plat, o.title || "", o.brand || "", o.priceText || (o.priceValue ? `¥${o.priceValue}` : ""), o.unitText || "", o.deliveryText || "", o.productUrl || "",
+      ]);
+    });
+    downloadCSV(headers, lines, `比价结果_${result.filename.replace(/\.[^.]+$/, "")}.csv`);
+  }, [result, rowCompare]);
+
   const accentColor = "var(--accent)";
   const borderColor = "var(--border)";
 
@@ -505,11 +515,11 @@ export default function InquiryPage({ onToggleSidebar }: { onToggleSidebar?: () 
                   重新上传
                 </button>
                 <button
-                  onClick={() => downloadCSV(result)}
+                  onClick={handleExportCSV}
                   style={{ background: accentColor, border: "none", borderRadius: 6, padding: "7px 16px", fontSize: 13, color: "#fff", fontWeight: 500, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}
                 >
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3" /></svg>
-                  导出 CSV
+                  导出比价结果
                 </button>
               </div>
             </div>
@@ -663,12 +673,6 @@ export default function InquiryPage({ onToggleSidebar }: { onToggleSidebar?: () 
                       onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = accentColor; (e.currentTarget as HTMLButtonElement).style.color = accentColor; }}
                       onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = borderColor; (e.currentTarget as HTMLButtonElement).style.color = "var(--text-secondary)"; }}
                     >查看</button>
-                    <button
-                      onClick={() => downloadCSV(h.result)}
-                      style={{ background: "none", border: `1px solid ${borderColor}`, borderRadius: 4, padding: "3px 8px", fontSize: 11.5, color: accentColor, cursor: "pointer", whiteSpace: "nowrap" }}
-                      onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = accentColor; (e.currentTarget as HTMLButtonElement).style.color = "#fff"; }}
-                      onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = "none"; (e.currentTarget as HTMLButtonElement).style.color = accentColor; }}
-                    >导出</button>
                     <button
                       onClick={() => deleteHistory(h.id)}
                       style={{ background: "none", border: "none", padding: "3px 5px", cursor: "pointer", color: "var(--text-muted)", borderRadius: 4, display: "flex", alignItems: "center" }}
