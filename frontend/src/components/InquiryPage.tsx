@@ -106,6 +106,8 @@ export default function InquiryPage({ onToggleSidebar }: { onToggleSidebar?: () 
     error?: string;
   }
   const [rowCompare, setRowCompare] = useState<Map<number, RowCompare>>(new Map());
+  // 当前展示的 result 对应的 history 条目 id,持久化 compareTaskId 时定位该条目
+  const [currentHistoryId, setCurrentHistoryId] = useState<string>("");
   const rowCompareRef = useRef(rowCompare);
   useEffect(() => { rowCompareRef.current = rowCompare; }, [rowCompare]);
 
@@ -173,9 +175,11 @@ export default function InquiryPage({ onToggleSidebar }: { onToggleSidebar?: () 
         throw new Error(err.detail || `请求失败 ${res.status}`);
       }
       const data: InquiryResult = await res.json();
+      const entryId = Date.now().toString(36);
       setResult(data);
+      setCurrentHistoryId(entryId);
       setHistory((h) => [
-        { id: Date.now().toString(36), filename: file.name, total: data.total, matched: data.matched, time: Date.now(), result: data },
+        { id: entryId, filename: file.name, total: data.total, matched: data.matched, time: Date.now(), result: data },
         ...h.slice(0, 19),
       ]);
     } catch (e) {
@@ -211,9 +215,38 @@ export default function InquiryPage({ onToggleSidebar }: { onToggleSidebar?: () 
     });
   };
 
-  const persistCompareTaskId = useCallback((_idx: number, _taskId: string) => {
-    // Task 5 补全:写入 result.rows[idx].compareTaskId + 同步 history + saveHistory
-  }, []);
+  const persistCompareTaskId = useCallback((idx: number, taskId: string) => {
+    // 1) 更新当前 result 中该行的 compareTaskId
+    setResult((prev) => {
+      if (!prev) return prev;
+      const rows = prev.rows.map((r) => (r.index === idx ? { ...r, compareTaskId: taskId } : r));
+      return { ...prev, rows };
+    });
+    // 2) 同步进 history 对应条目并落 localStorage(关页面后可恢复)
+    setHistory((prev) => {
+      const next = prev.map((e) =>
+        e.id === currentHistoryId
+          ? { ...e, result: { ...e.result, rows: e.result.rows.map((r) => (r.index === idx ? { ...r, compareTaskId: taskId } : r)) } }
+          : e,
+      );
+      saveHistory(next);
+      return next;
+    });
+  }, [currentHistoryId]);
+
+  // result 设定后(upload 完成 / 从历史恢复),把已比价过的行重新挂上轮询接回结果
+  useEffect(() => {
+    if (!result) return;
+    setRowCompare((prev) => {
+      const next = new Map(prev);
+      result.rows.forEach((r) => {
+        if (r.compareTaskId && !next.has(r.index)) {
+          next.set(r.index, { taskId: r.compareTaskId, task: null, loading: false });
+        }
+      });
+      return next;
+    });
+  }, [result]);
 
   const handleCompareRow = useCallback(async (row: InquiryRow) => {
     // 强制展开该行(库内无匹配的行也能看外部结果)
@@ -622,7 +655,7 @@ export default function InquiryPage({ onToggleSidebar }: { onToggleSidebar?: () 
                   <span style={{ color: "var(--text-muted)", fontSize: 11.5 }}>{formatTime(h.time)}</span>
                   <div style={{ display: "flex", gap: 4 }}>
                     <button
-                      onClick={() => { setResult(h.result); setError(""); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+                      onClick={() => { setResult(h.result); setCurrentHistoryId(h.id); setError(""); window.scrollTo({ top: 0, behavior: "smooth" }); }}
                       style={{ background: "none", border: `1px solid ${borderColor}`, borderRadius: 4, padding: "3px 8px", fontSize: 11.5, color: "var(--text-secondary)", cursor: "pointer", whiteSpace: "nowrap" }}
                       onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = accentColor; (e.currentTarget as HTMLButtonElement).style.color = accentColor; }}
                       onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = borderColor; (e.currentTarget as HTMLButtonElement).style.color = "var(--text-secondary)"; }}
