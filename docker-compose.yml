@@ -3,7 +3,7 @@ services:
     image: neosmemo/memos:stable
     container_name: mro-memos
     ports:
-      - "5230:5230"
+      - "127.0.0.1:5230:5230"
     volumes:
       - ./memos-data:/var/opt/memos
     restart: unless-stopped
@@ -13,7 +13,7 @@ services:
     container_name: mro-backend
     env_file: ./backend/.env
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     depends_on:
       - memos
     restart: unless-stopped
@@ -22,7 +22,7 @@ services:
     build: ./frontend
     container_name: mro-frontend
     ports:
-      - "3000:8080"
+      - "127.0.0.1:3000:8080"
     depends_on:
       - backend
     restart: unless-stopped
