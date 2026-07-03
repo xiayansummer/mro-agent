@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { ChatMessage, ComparisonPlatform } from "../types";
 import { getComparisonTask, retryComparisonPlatform, sendMessage, startComparisonDraft } from "../services/api";
+import { useComparisonPolling, PollTarget } from "../hooks/useComparisonPolling";
 import MessageBubble from "./MessageBubble";
 import ErrorBoundary from "./ErrorBoundary";
 import ChatInput from "./ChatInput";
@@ -59,42 +60,21 @@ export default function ChatWindow({ sessionId, messages, onMessagesChange, onTo
   // 会话(流的生命周期属于会话,不属于当前视图)。否则切走再回来答案被截断、需重发,
   // 且后端在客户端断开时只把半截答案落库。显式「停止」仍经 handleStop 主动 abort。
   // 流是否进行中改由消息的 isStreaming 派生(见下方 streamingInData),重挂载也能恢复。
-  // 仅在"活跃比价任务集合(id:status)"真正变化时才变,避免流式 chunk 改 content
-  // 触发该 effect cleanup+重建 setInterval(原依赖 [messages] 会每个 chunk 重建)。
-  const activeTaskKey = useMemo(
+  // 比价任务轮询交给共享 useComparisonPolling(与批量询价页同一实现,含失败上限/
+  // 可见性暂停/切回即拉)。updateMessages 同步更新 messagesRef,故逐任务回调可安全累积。
+  const pollTargets = useMemo<PollTarget[]>(
     () =>
       messages
-        .filter((message) => message.comparisonTask && ["queued", "running", "partial"].includes(message.comparisonTask.status))
-        .map((message) => `${message.comparisonTask!.id}:${message.comparisonTask!.status}`)
-        .join(","),
+        .filter((m) => m.comparisonTask)
+        .map((m) => ({ key: m.comparisonTask!.id, taskId: m.comparisonTask!.id, status: m.comparisonTask!.status })),
     [messages]
   );
-  useEffect(() => {
-    if (activeTaskKey === "") return;
-
-    const timer = window.setInterval(async () => {
-      const activeTaskMessages = messagesRef.current.filter((message) =>
-        message.comparisonTask && ["queued", "running", "partial"].includes(message.comparisonTask.status)
-      );
-      if (activeTaskMessages.length === 0) return;
-      const updates = await Promise.allSettled(
-        activeTaskMessages.map((message) => getComparisonTask(message.comparisonTask!.id))
-      );
-      const taskById = new Map(
-        updates
-          .filter((result): result is PromiseFulfilledResult<Awaited<ReturnType<typeof getComparisonTask>>> => result.status === "fulfilled")
-          .map((result) => [result.value.id, result.value])
-      );
-      if (taskById.size === 0) return;
-      const next = messagesRef.current.map((message) => {
-        const taskId = message.comparisonTask?.id;
-        return taskId && taskById.has(taskId) ? { ...message, comparisonTask: taskById.get(taskId) } : message;
-      });
-      updateMessages(next);
-    }, 2500);
-
-    return () => window.clearInterval(timer);
-  }, [activeTaskKey, updateMessages]);
+  useComparisonPolling(pollTargets, (_key, task) => {
+    const next = messagesRef.current.map((message) =>
+      message.comparisonTask?.id === task.id ? { ...message, comparisonTask: task } : message
+    );
+    updateMessages(next);
+  });
 
   const handleScroll = useCallback(() => {
     const el = containerRef.current;

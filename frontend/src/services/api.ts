@@ -10,6 +10,8 @@ import {
   ExtensionStatus,
 } from "../types";
 import { authHeader } from "./auth";
+import { createSSEParser } from "./sseParser";
+import { normalizeComparisonTask } from "./normalize";
 
 export async function submitFeedback(
   sessionId: string,
@@ -114,9 +116,7 @@ export async function sendMessage(
   }
 
   const decoder = new TextDecoder();
-  let buffer = "";
   let finished = false;
-  let eventType = "";  // persists across chunks so event+data split across reads still works
 
   function handleEvent(event: string, data: string) {
     switch (event) {
@@ -171,26 +171,16 @@ export async function sendMessage(
     }
   }
 
+  // 分帧交给可单测的纯状态机(见 sseParser.ts / sseParser.test.ts)
+  const parser = createSSEParser((e) => handleEvent(e.event, e.data));
   while (true) {
     const { done, value } = await reader.read();
     if (done) {
+      parser.flush();
       if (!finished) callbacks.onDone();
       break;
     }
-
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() || "";
-
-    for (const line of lines) {
-      if (line.startsWith("event: ")) {
-        eventType = line.slice(7).trim();
-      } else if (line.startsWith("data: ")) {
-        const data = line.slice(6);
-        handleEvent(eventType, data);
-        eventType = "";
-      }
-    }
+    parser.push(decoder.decode(value, { stream: true }));
   }
 }
 
@@ -203,7 +193,7 @@ export async function startComparisonDraft(draftId: string): Promise<ComparisonT
     if (response.status === 401) window.dispatchEvent(new Event("mro:unauthorized"));
     throw new Error(await responseText(response, "启动比价失败"));
   }
-  return response.json();
+  return normalizeComparisonTask(await response.json());
 }
 
 export async function getComparisonTask(taskId: string): Promise<ComparisonTask> {
@@ -214,7 +204,7 @@ export async function getComparisonTask(taskId: string): Promise<ComparisonTask>
     if (response.status === 401) window.dispatchEvent(new Event("mro:unauthorized"));
     throw new Error(await responseText(response, "获取比价任务失败"));
   }
-  return response.json();
+  return normalizeComparisonTask(await response.json());
 }
 
 export async function retryComparisonPlatform(
@@ -230,7 +220,7 @@ export async function retryComparisonPlatform(
     if (response.status === 401) window.dispatchEvent(new Event("mro:unauthorized"));
     throw new Error(await responseText(response, "重试比价平台失败"));
   }
-  return response.json();
+  return normalizeComparisonTask(await response.json());
 }
 
 export async function getExtensionStatus(): Promise<ExtensionStatus> {

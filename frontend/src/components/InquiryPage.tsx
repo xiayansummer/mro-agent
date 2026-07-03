@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { authHeader } from "../services/auth";
-import { compareInquiryRow, getComparisonTask } from "../services/api";
+import { compareInquiryRow } from "../services/api";
+import { useComparisonPolling, PollTarget } from "../hooks/useComparisonPolling";
 import ComparisonTaskCard from "./ComparisonTaskCard";
 import ErrorBoundary from "./ErrorBoundary";
 import { ComparisonTask } from "../types";
@@ -93,41 +94,25 @@ export default function InquiryPage({ onToggleSidebar }: { onToggleSidebar?: () 
   useEffect(() => { currentHistoryIdRef.current = currentHistoryId; }, [currentHistoryId]);
   // 自动批量比价函数的 ref(供 processFile 调用,规避 useCallback 定义顺序的 TDZ)
   const autoCompareRowsRef = useRef<(rows: InquiryRow[], historyId: string) => void>(() => {});
-  const rowCompareRef = useRef(rowCompare);
-  useEffect(() => { rowCompareRef.current = rowCompare; }, [rowCompare]);
 
-  // 仅当"活跃比价行集合"变化时重建轮询定时器,避免每次 setRowCompare 都重建
-  const activeCompareKey = useMemo(
+  // 活跃比价行 → 轮询目标,交给共享 useComparisonPolling 统一轮询
+  // (含失败上限/可见性暂停/切回即拉;selectPollable 内部过滤终态,故传全部含 taskId 的行)
+  const pollTargets = useMemo<PollTarget[]>(
     () =>
       Array.from(rowCompare.entries())
-        .filter(([, c]) => c.taskId && (!c.task || ["queued", "running", "partial"].includes(c.task.status)))
-        .map(([idx, c]) => `${idx}:${c.taskId}:${c.task?.status ?? "new"}`)
-        .join(","),
+        .filter(([, c]) => c.taskId)
+        .map(([idx, c]) => ({ key: idx, taskId: c.taskId, status: c.task?.status })),
     [rowCompare],
   );
-
-  useEffect(() => {
-    if (!activeCompareKey) return;
-    const timer = window.setInterval(async () => {
-      const active = Array.from(rowCompareRef.current.entries()).filter(
-        ([, c]) => c.taskId && (!c.task || ["queued", "running", "partial"].includes(c.task.status)),
-      );
-      if (active.length === 0) return;
-      const updates = await Promise.allSettled(active.map(([, c]) => getComparisonTask(c.taskId)));
-      setRowCompare((prev) => {
-        const next = new Map(prev);
-        active.forEach(([idx], i) => {
-          const u = updates[i];
-          if (u.status === "fulfilled") {
-            const cur = next.get(idx);
-            if (cur) next.set(idx, { ...cur, task: u.value });
-          }
-        });
-        return next;
-      });
-    }, 2500);
-    return () => window.clearInterval(timer);
-  }, [activeCompareKey]);
+  useComparisonPolling(pollTargets, (key, task) => {
+    setRowCompare((prev) => {
+      const cur = prev.get(key as number);
+      if (!cur) return prev;
+      const next = new Map(prev);
+      next.set(key as number, { ...cur, task });
+      return next;
+    });
+  });
 
   useEffect(() => { saveHistory(history); }, [history]);
 
