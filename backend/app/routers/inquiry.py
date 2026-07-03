@@ -5,14 +5,10 @@ POST /api/inquiry/compare-row — 对一行需求触发三平台外部比价(京
 GET  /api/inquiry/template    — 下载询价模板
 """
 import asyncio
-import io
-import csv
 import os
 import uuid
 from typing import Optional
 
-import openpyxl
-import xlrd
 from fastapi import APIRouter, Body, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
@@ -20,6 +16,7 @@ from app.routers.auth import require_user_id
 from app.services.comparison_structure import build_comparison_structure
 from app.services.comparison_draft_service import create_draft, _require_db_user_id
 from app.services.comparison_task_service import start_draft
+from app.services.spreadsheet import read_sheet_rows
 
 router = APIRouter()
 
@@ -78,22 +75,10 @@ def parse_rows_from_sheet(raw_rows: list[list[str]]) -> list[dict]:
 
 
 def parse_excel_bytes(content: bytes, filename: str) -> list[dict]:
-    name_lower = filename.lower()
-    if not name_lower.endswith((".xlsx", ".xls", ".csv")):
-        raise HTTPException(status_code=400, detail="不支持的文件格式，请上传 .xlsx / .xls / .csv")
     try:
-        if name_lower.endswith(".xlsx"):
-            wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
-            ws = wb.active
-            raw = [[str(cell.value or "").strip() for cell in row] for row in ws.iter_rows()]
-        elif name_lower.endswith(".xls"):
-            wb = xlrd.open_workbook(file_contents=content)
-            ws = wb.sheet_by_index(0)
-            raw = [[str(ws.cell_value(r, c)).strip() for c in range(ws.ncols)] for r in range(ws.nrows)]
-        else:  # .csv
-            text = content.decode("utf-8-sig", errors="replace")
-            reader = csv.reader(io.StringIO(text))
-            raw = [row for row in reader]
+        raw = read_sheet_rows(content, filename)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="不支持的文件格式，请上传 .xlsx / .xls / .csv")
     except Exception as e:
         # 后缀合法但内容损坏/非真实表格 → 400 而非未捕获的 500
         raise HTTPException(status_code=400, detail="文件无法解析，请确认是有效的 .xlsx / .xls / .csv 文件") from e

@@ -1,7 +1,8 @@
 import logging
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.routers.auth import router as auth_router
 from app.routers.chat import router as chat_router
@@ -36,6 +37,16 @@ app.include_router(extension_router, prefix="/api")
 app.include_router(feedback_router, prefix="/api")
 app.include_router(inquiry_router, prefix="/api")
 app.include_router(profile_router, prefix="/api")
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """兜底未捕获异常:保证记日志(可观测)+ 统一错误信封;生产环境隐藏内部细节,
+    避免各 router 未捕获异常直接落到框架默认 500、或泄露堆栈/实现细节。
+    HTTPException 仍由 FastAPI 默认处理器处理,不受此影响。"""
+    logger.exception("Unhandled error on %s %s", request.method, request.url.path)
+    detail = "服务器内部错误，请稍后重试" if settings.is_production else f"{type(exc).__name__}: {exc}"
+    return JSONResponse(status_code=500, content={"detail": detail})
 
 
 @app.on_event("startup")

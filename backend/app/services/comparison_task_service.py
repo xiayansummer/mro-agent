@@ -26,10 +26,24 @@ from app.services.comparison_common import (  # noqa: F401
     _loads,
     _millis,
 )
+# 状态机已拆到 comparison_task_status;re-export 使内部调用与外部 import 均不变。
+from app.services.comparison_task_status import (  # noqa: F401
+    _task_status_for_subtasks,
+    _row_to_subtask,
+    _refresh_task_status,
+)
+# 扩展队列 broker 已拆到 comparison_lease_broker;re-export 保持外部
+# `comparison_task_service.lease_next_subtask/update_subtask_status/submit_subtask_results`
+# 与 `_required_brand_from_structure`(test)、`SUBTASK_LEASE_SECONDS` 仍可用。
+from app.services.comparison_lease_broker import (  # noqa: F401
+    SUBTASK_LEASE_SECONDS,
+    lease_next_subtask,
+    update_subtask_status,
+    submit_subtask_results,
+    _required_brand_from_structure,
+)
 
 logger = logging.getLogger(__name__)
-
-SUBTASK_LEASE_SECONDS = 90
 
 
 async def start_draft(draft_id: str, user_id: str) -> Optional[dict]:
@@ -459,187 +473,6 @@ def _is_heartbeat_login_error(raw_error: str | None) -> bool:
     )
 
 
-async def lease_next_subtask(ext_token: str) -> Optional[dict]:
-    extension_session = await extension_service.get_session_by_token(ext_token)
-    if not extension_session:
-        return None
-
-    now = datetime.utcnow()
-    leased_until = now + timedelta(seconds=SUBTASK_LEASE_SECONDS)
-    async with AsyncSessionLocal() as session:
-        candidate_result = await session.execute(
-            text(
-                """
-                SELECT st.id, st.task_id, st.platform, st.search_terms_json, d.structure_json
-                FROM comparison_subtasks st
-                JOIN comparison_tasks t ON t.id = st.task_id
-                JOIN comparison_drafts d ON d.id = t.draft_id
-                WHERE t.user_id = :uid
-                  AND st.status = :queued
-                  AND (st.leased_until IS NULL OR st.leased_until < :now)
-                ORDER BY st.created_at, st.id
-                LIMIT 1
-                """
-            ),
-            {
-                "uid": extension_session["userId"],
-                "queued": ComparisonSubtaskStatus.QUEUED.value,
-                "now": now,
-            },
-        )
-        candidate = candidate_result.fetchone()
-        if not candidate:
-            return None
-
-        update_result = await session.execute(
-            text(
-                """
-                UPDATE comparison_subtasks
-                SET status = :status, leased_until = :leased_until
-                WHERE id = :id
-                  AND status = :queued
-                  AND (leased_until IS NULL OR leased_until < :now)
-                """
-            ),
-            {
-                "status": ComparisonSubtaskStatus.IN_PROGRESS.value,
-                "leased_until": leased_until,
-                "id": candidate[0],
-                "queued": ComparisonSubtaskStatus.QUEUED.value,
-                "now": now,
-            },
-        )
-        if update_result.rowcount <= 0:
-            await session.rollback()
-            return None
-        await session.execute(
-            text("UPDATE comparison_tasks SET status = :status WHERE id = :task_id"),
-            {"status": ComparisonTaskStatus.RUNNING.value, "task_id": candidate[1]},
-        )
-        await session.commit()
-
-    return {
-        "subtaskId": candidate[0],
-        "taskId": candidate[1],
-        "platform": candidate[2],
-        "searchTerms": _loads(candidate[3]) or [],
-        "requiredBrand": _required_brand_from_structure(candidate[4]),
-        # 时区安全:leased_until 来自 datetime.utcnow()(naive UTC),走 _millis 声明 UTC
-        "leasedUntil": _millis(leased_until),
-    }
-
-
-async def update_subtask_status(ext_token: str, subtask_id: str, status: str, message: Optional[str] = None) -> bool:
-    extension_session = await extension_service.get_session_by_token(ext_token)
-    if not extension_session or status not in {item.value for item in ComparisonSubtaskStatus}:
-        return False
-
-    error_json = _json({"message": message}) if message else None
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            text(
-                """
-                UPDATE comparison_subtasks st
-                JOIN comparison_tasks t ON t.id = st.task_id
-                SET st.status = :status,
-                    st.error_json = :error_json,
-                    st.leased_until = NULL
-                WHERE st.id = :subtask_id AND t.user_id = :uid
-                """
-            ),
-            {
-                "status": status,
-                "error_json": error_json,
-                "subtask_id": subtask_id,
-                "uid": extension_session["userId"],
-            },
-        )
-        if result.rowcount <= 0:
-            await session.rollback()
-            return False
-        await _refresh_task_status(session, subtask_id)
-        await session.commit()
-    return True
-
-
-async def submit_subtask_results(
-    ext_token: str,
-    subtask_id: str,
-    platform: str,
-    search_term: str,
-    offers: list[dict],
-) -> bool:
-    extension_session = await extension_service.get_session_by_token(ext_token)
-    if not extension_session:
-        return False
-
-    async with AsyncSessionLocal() as session:
-        structure = await _get_task_structure_for_subtask(session, subtask_id, extension_session["userId"])
-        if structure is None:
-            return False
-
-        # 取用户历史偏好,传入 ranker 做 DPO 硬加权(命中偏好品牌/品类显著提分)。
-        # get_preference_signals 内部已 try/except,失败返回空、不阻塞排序。
-        preferences = await memory_service.get_preference_signals(
-            db_id_to_external_id(extension_session["userId"])
-        )
-
-        items = [
-            {
-                **offer,
-                "selectedSearchTerm": search_term,
-            }
-            for offer in rank_external_offers(structure, offers, preferences=preferences)
-        ]
-        result = await session.execute(
-            text(
-                """
-                UPDATE comparison_subtasks st
-                JOIN comparison_tasks t ON t.id = st.task_id
-                SET st.status = :status,
-                    st.items_json = :items_json,
-                    st.error_json = NULL,
-                    st.leased_until = NULL
-                WHERE st.id = :subtask_id
-                  AND st.platform = :platform
-                AND t.user_id = :uid
-                """
-            ),
-            {
-                "status": ComparisonSubtaskStatus.DONE.value,
-                "items_json": _json(items),
-                "subtask_id": subtask_id,
-                "platform": platform,
-                "uid": extension_session["userId"],
-            },
-        )
-        if result.rowcount <= 0:
-            await session.rollback()
-            return False
-        await _refresh_task_status(session, subtask_id)
-        await session.commit()
-    return True
-
-
-async def _get_task_structure_for_subtask(session, subtask_id: str, user_id: int) -> Optional[dict]:
-    result = await session.execute(
-        text(
-            """
-            SELECT d.structure_json
-            FROM comparison_subtasks st
-            JOIN comparison_tasks t ON t.id = st.task_id
-            JOIN comparison_drafts d ON d.id = t.draft_id
-            WHERE st.id = :subtask_id AND t.user_id = :uid
-            """
-        ),
-        {"subtask_id": subtask_id, "uid": user_id},
-    )
-    row = result.fetchone()
-    if not row:
-        return None
-    return _loads(row[0]) or {}
-
-
 def _build_subtask_specs(
     selected_platforms: list[str],
     search_terms: dict,
@@ -671,83 +504,6 @@ def _blocked_subtask(platform: str, terms: list[str], code: str, message: str) -
     }
 
 
-def _required_brand_from_structure(raw_structure: str | None) -> str:
-    structure = _loads(raw_structure) if raw_structure else {}
-    brand = structure.get("specification", {}).get("brand") if isinstance(structure, dict) else None
-    return str(brand or "").strip()
-
-
-def _task_status_for_subtasks(subtasks: list[dict]) -> str:
-    if any(item["status"] == ComparisonSubtaskStatus.QUEUED.value for item in subtasks):
-        return ComparisonTaskStatus.QUEUED.value
-    return ComparisonTaskStatus.PARTIAL.value
-
-
-def _row_to_subtask(row) -> dict:
-    return {
-        "id": row[0],
-        "platform": row[1],
-        "status": row[2],
-        "searchTerms": _loads(row[3]) or [],
-        "items": _loads(row[4]) or [],
-        "error": _loads(row[5]) if row[5] else None,
-        "leasedUntil": _millis(row[6]) if row[6] else None,
-        "createdAt": _millis(row[7]),
-        "updatedAt": _millis(row[8]),
-    }
-
-
-async def _refresh_task_status(session, subtask_id: str) -> None:
-    task_result = await session.execute(
-        text("SELECT task_id FROM comparison_subtasks WHERE id = :subtask_id"),
-        {"subtask_id": subtask_id},
-    )
-    task = task_result.fetchone()
-    if not task:
-        return
-
-    counts_result = await session.execute(
-        text(
-            """
-            SELECT status, COUNT(*)
-            FROM comparison_subtasks
-            WHERE task_id = :task_id
-            GROUP BY status
-            """
-        ),
-        {"task_id": task[0]},
-    )
-    counts = {row[0]: int(row[1]) for row in counts_result.fetchall()}
-    total = sum(counts.values())
-    done = counts.get(ComparisonSubtaskStatus.DONE.value, 0)
-    terminal = done + counts.get(ComparisonSubtaskStatus.FAILED.value, 0) + counts.get(
-        ComparisonSubtaskStatus.TIMEOUT.value, 0
-    ) + counts.get(ComparisonSubtaskStatus.LOGIN_REQUIRED.value, 0)
-
-    if total > 0 and done == total:
-        task_status = ComparisonTaskStatus.DONE.value
-        completed_at = datetime.utcnow()
-    elif total > 0 and terminal == total:
-        task_status = ComparisonTaskStatus.PARTIAL.value if done else ComparisonTaskStatus.FAILED.value
-        completed_at = datetime.utcnow()
-    elif counts.get(ComparisonSubtaskStatus.IN_PROGRESS.value, 0) > 0:
-        task_status = ComparisonTaskStatus.RUNNING.value
-        completed_at = None
-    else:
-        task_status = ComparisonTaskStatus.QUEUED.value
-        completed_at = None
-
-    await session.execute(
-        text(
-            """
-            UPDATE comparison_tasks
-            SET status = :status, completed_at = :completed_at
-            WHERE id = :task_id
-            """
-        ),
-        {"status": task_status, "completed_at": completed_at, "task_id": task[0]},
-    )
-
-
-# _require_db_user_id / _new_id / _json / _loads / _millis 已抽到 comparison_common,
-# 见文件顶部的 re-export import。
+# _task_status_for_subtasks / _row_to_subtask / _refresh_task_status 已抽到
+# comparison_task_status;_require_db_user_id / _new_id / _json / _loads / _millis 已抽到
+# comparison_common。均见文件顶部的 re-export import。

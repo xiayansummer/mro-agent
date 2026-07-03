@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 import pytest
 
 from app.models.comparison import ExtensionStatus, PlatformStatus
-from app.services import comparison_task_service
+from app.services import comparison_task_service, comparison_lease_broker
 
 
 class FakeResult:
@@ -268,6 +268,8 @@ def fake_db(monkeypatch):
     FakeSession.subtasks = {}
     FakeSession.last_draft_status = None
     monkeypatch.setattr(comparison_task_service, "AsyncSessionLocal", FakeSession)
+    # lease broker 已拆为独立模块、用自己的 AsyncSessionLocal,需一并 patch
+    monkeypatch.setattr(comparison_lease_broker, "AsyncSessionLocal", FakeSession)
 
 
 @pytest.mark.asyncio

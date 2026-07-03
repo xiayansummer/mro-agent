@@ -80,10 +80,10 @@ async def get_web_extension_status(user_id: str = Depends(require_user_id)):
 @router.post("/extension/status")
 async def update_extension_status(
     req: UpdateExtensionStatusRequest,
-    extension_token: str = Header(None, alias="X-Extension-Token"),
+    extension_token: str = Depends(require_extension_token),
 ):
     if not await extension_service.update_extension_status(
-        ext_token=extension_token or "",
+        ext_token=extension_token,
         device_name=req.deviceName,
         version=req.version,
         platforms=req.platforms,
@@ -94,9 +94,8 @@ async def update_extension_status(
 
 @router.get("/extension/tasks/next")
 async def get_next_task(
-    extension_token: str = Header(None, alias="X-Extension-Token"),
+    extension_token: str = Depends(require_extension_token),
 ):
-    require_extension_token(extension_token)
     task = await comparison_task_service.lease_next_subtask(extension_token)
     if not task:
         return Response(status_code=204)
@@ -107,9 +106,8 @@ async def get_next_task(
 async def update_subtask_status(
     subtask_id: str,
     req: UpdateSubtaskStatusRequest,
-    extension_token: str = Header(None, alias="X-Extension-Token"),
+    extension_token: str = Depends(require_extension_token),
 ):
-    require_extension_token(extension_token)
     if not await comparison_task_service.update_subtask_status(
         ext_token=extension_token,
         subtask_id=subtask_id,
@@ -124,9 +122,8 @@ async def update_subtask_status(
 async def submit_subtask_results(
     subtask_id: str,
     req: SubmitSubtaskResultsRequest,
-    extension_token: str = Header(None, alias="X-Extension-Token"),
+    extension_token: str = Depends(require_extension_token),
 ):
-    require_extension_token(extension_token)
     if not await comparison_task_service.submit_subtask_results(
         ext_token=extension_token,
         subtask_id=subtask_id,

@@ -2,7 +2,6 @@ import re
 from typing import Optional
 
 from pydantic import BaseModel, Field
-from sqlalchemy import text
 
 from app.models.comparison import (
     ComparisonCategory,
@@ -11,6 +10,7 @@ from app.models.comparison import (
     PurchaseConstraints,
     SpecificationAttribute,
 )
+from app.services import erp_catalog
 from app.services.comparison_query_builder import build_search_terms
 from app.services.intent_parser import parse_intent
 
@@ -108,20 +108,11 @@ async def build_comparison_structure(
     # skip_clarification:用户点"直接检索"或已提交过 slot 卡片 → 跳过参数追问,
     # 避免反复问未知参数;仍保留下方"完全无法识别产品"的 guidance 兜底。
     if not skip_clarification:
-        parsed_slot = _parsed_slot_clarification(parsed)
-        if parsed_slot:
-            await _enrich_brand_only_category_options(parsed, parsed_slot)
+        slot = await _slot_clarification(parsed, structure)
+        if slot:
             return ComparisonStructureResult(
                 shouldCreateDraft=False,
-                slotClarification=parsed_slot,
-                parsedIntent=parsed,
-            )
-
-        slot_clarification = _comparison_slot_clarification(parsed, structure)
-        if slot_clarification:
-            return ComparisonStructureResult(
-                shouldCreateDraft=False,
-                slotClarification=slot_clarification,
+                slotClarification=slot,
                 parsedIntent=parsed,
             )
 
@@ -138,6 +129,18 @@ async def build_comparison_structure(
         structure=structure,
         parsedIntent=parsed,
     )
+
+
+async def _slot_clarification(parsed: dict, structure: ComparisonStructure) -> Optional[dict]:
+    """统一的追问计算入口。优先用 LLM 产出的 slot_clarification(品类感知更强,并对
+    brand-only 场景用 DB 真实经营品类替换候选);LLM 未产出时回落到确定性 Python 规则
+    (可单测)。单一入口,避免"两套追问引擎"散落在 build_comparison_structure 调用点。
+    (归一为单一真源;若要彻底改成只信任其中一方,属行为改动,另行评审。)"""
+    parsed_slot = _parsed_slot_clarification(parsed)
+    if parsed_slot:
+        await _enrich_brand_only_category_options(parsed, parsed_slot)
+        return parsed_slot
+    return _comparison_slot_clarification(parsed, structure)
 
 
 def _structure_from_intent(user_message: str, parsed: dict) -> ComparisonStructure:
@@ -228,60 +231,6 @@ def _apply_brand_categories_to_slot(parsed: dict, slot: dict, categories: list[s
     return False
 
 
-async def _query_brand_categories(session, brand: str) -> list[str]:
-    """查该品牌的真实经营 L3 品类(按 SKU 数降序)。
-
-    第一步在 t_brand(主键 sid, brandName)按品牌名 + 字典别名 LIKE 找出品牌 sid
-    (兼顾"美和""美和 TOHO""MyMRO | 美和"等多条记录);第二步在 v_item_info 视图
-    (UNION 全 10 个商品分片 + 已过滤 deleted)按 brand_id 聚合 l3 品类。
-    过滤用 brand_id(而非 brand_name),可下推到各分片走索引,全量约 0.1~0.4s。
-    """
-    from app.services.normalization import _seed_terms_for
-
-    terms = _seed_terms_for(brand) or [brand]
-    like_clauses = " OR ".join(f"brandName LIKE :t{i}" for i in range(len(terms)))
-    like_params = {f"t{i}": f"%{term}%" for i, term in enumerate(terms)}
-    brand_rows = await session.execute(
-        text(f"SELECT sid FROM t_brand WHERE {like_clauses}"),
-        like_params,
-    )
-    sids = [row[0] for row in brand_rows.fetchall()]
-    if not sids:
-        return []
-
-    placeholders = ",".join(f":b{i}" for i in range(len(sids)))
-    cat_params = {f"b{i}": sid for i, sid in enumerate(sids)}
-    cat_rows = await session.execute(
-        text(
-            f"""
-            SELECT l3_category_name, COUNT(*) AS cnt
-            FROM v_item_info
-            WHERE brand_id IN ({placeholders})
-              AND l3_category_name IS NOT NULL
-            GROUP BY l3_category_name
-            ORDER BY cnt DESC
-            LIMIT 6
-            """
-        ),
-        cat_params,
-    )
-    return [row[0] for row in cat_rows.fetchall() if row[0]]
-
-
-async def _fetch_brand_categories(brand: str) -> list[str]:
-    """查该品牌的真实经营 L3 品类。失败/无数据返回空(不阻断主流程)。"""
-    brand = (brand or "").strip()
-    if not brand:
-        return []
-    from app.db.mysql import AsyncSessionLocal
-
-    try:
-        async with AsyncSessionLocal() as session:
-            return await _query_brand_categories(session, brand)
-    except Exception:
-        return []
-
-
 async def _enrich_brand_only_category_options(parsed: dict, slot: dict) -> None:
     """brand-only 且 slot 含品类维度时,用 DB 真实品类替换 LLM 凭空生成的品类候选。
     通用于所有品牌:用户只给品牌名时,品类候选来自该品牌在库里的真实经营品类。"""
@@ -291,7 +240,7 @@ async def _enrich_brand_only_category_options(parsed: dict, slot: dict) -> None:
     missing = slot.get("missing") or []
     if not any(_is_category_dimension(item) for item in missing):
         return
-    categories = await _fetch_brand_categories(brand)
+    categories = await erp_catalog.fetch_brand_categories(brand)
     _apply_brand_categories_to_slot(parsed, slot, categories)
 
 

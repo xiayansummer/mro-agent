@@ -3,13 +3,11 @@ ERP 历史数据导入服务。
 支持 Excel (.xlsx/.xls) 和 CSV 格式。
 只做聚合，不保存原始数据（隐私保护）。
 """
-import csv
-import io
 import logging
 import re
 from typing import Any
 
-import openpyxl
+from app.services.spreadsheet import read_sheet_rows
 
 logger = logging.getLogger(__name__)
 
@@ -38,49 +36,23 @@ def parse_column_map(headers: list[str]) -> dict[str, int]:
 
 
 def parse_rows(file_bytes: bytes, filename: str) -> list[dict[str, Any]]:
-    if filename.lower().endswith(".csv"):
-        return _parse_csv(file_bytes)
-    return _parse_excel(file_bytes)
+    """读表格 → 按 _COLUMN_ALIASES 映射列 → 每行一个 record(空值列跳过)。
 
-
-def _parse_excel(file_bytes: bytes) -> list[dict[str, Any]]:
-    wb = openpyxl.load_workbook(io.BytesIO(file_bytes), read_only=True, data_only=True)
-    ws = wb.active
-    rows_iter = ws.iter_rows(values_only=True)
-    try:
-        headers = [str(c).strip() if c is not None else "" for c in next(rows_iter)]
-    except StopIteration:
+    底层 .xlsx/.xls/.csv 读取统一走 spreadsheet.read_sheet_rows;损坏文件抛异常上抛,
+    由调用方(profile 路由)转 400。
+    """
+    rows = read_sheet_rows(file_bytes, filename)
+    if not rows:
         return []
-    col_map = parse_column_map(headers)
+    col_map = parse_column_map(rows[0])
     if not col_map:
         return []
     result = []
-    for row in rows_iter:
+    for raw_row in rows[1:]:
         record: dict[str, Any] = {}
         for field, idx in col_map.items():
-            if idx < len(row) and row[idx] is not None:
-                record[field] = str(row[idx]).strip()
-        if record:
-            result.append(record)
-    return result
-
-
-def _parse_csv(file_bytes: bytes) -> list[dict[str, Any]]:
-    text = file_bytes.decode("utf-8-sig", errors="replace")
-    reader = csv.reader(io.StringIO(text))
-    try:
-        headers = [h.strip() for h in next(reader)]
-    except StopIteration:
-        return []
-    col_map = parse_column_map(headers)
-    if not col_map:
-        return []
-    result = []
-    for raw_row in reader:
-        record: dict[str, Any] = {}
-        for field, idx in col_map.items():
-            if idx < len(raw_row) and raw_row[idx].strip():
-                record[field] = raw_row[idx].strip()
+            if idx < len(raw_row) and str(raw_row[idx]).strip():
+                record[field] = str(raw_row[idx]).strip()
         if record:
             result.append(record)
     return result

@@ -5,7 +5,7 @@ from app.models.comparison import (
     ComparisonSpecification,
     ComparisonStructure,
 )
-from app.services import comparison_structure
+from app.services import comparison_structure, erp_catalog
 from app.services.comparison_query_builder import build_search_terms
 
 
@@ -400,7 +400,7 @@ async def test_build_comparison_structure_brand_only_uses_db_categories(monkeypa
         return ["手拉葫芦", "电动葫芦", "钢丝绳"]
 
     monkeypatch.setattr(comparison_structure, "parse_intent", fake_parse_intent)
-    monkeypatch.setattr(comparison_structure, "_fetch_brand_categories", fake_fetch)
+    monkeypatch.setattr(erp_catalog, "fetch_brand_categories", fake_fetch)
 
     result = await comparison_structure.build_comparison_structure("美和")
 
@@ -421,7 +421,7 @@ async def test_query_brand_categories_two_step_sql():
     cat_res.fetchall.return_value = [("组合吊索具", 563), ("葫芦绞车", 91)]
     session.execute.side_effect = [sid_res, cat_res]
 
-    cats = await comparison_structure._query_brand_categories(session, "美和")
+    cats = await erp_catalog._query_brand_categories(session, "美和")
 
     assert cats == ["组合吊索具", "葫芦绞车"]
     assert session.execute.call_count == 2
@@ -440,7 +440,7 @@ async def test_query_brand_categories_no_brand_match():
     sid_res.fetchall.return_value = []
     session.execute.side_effect = [sid_res]
 
-    cats = await comparison_structure._query_brand_categories(session, "查无此牌")
+    cats = await erp_catalog._query_brand_categories(session, "查无此牌")
 
     assert cats == []
     assert session.execute.call_count == 1  # 品牌都查不到就不再查品类
