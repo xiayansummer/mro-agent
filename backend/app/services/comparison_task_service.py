@@ -16,7 +16,16 @@ from app.models.comparison import (
 from app.services import ehsy_comparison_source, extension_service
 from app.services.comparison_ranker import rank_external_offers
 from app.services.memory_service import memory_service
-from app.services.user_service import _external_id_to_db_id, db_id_to_external_id
+from app.services.user_service import _external_id_to_db_id, db_id_to_external_id  # noqa: F401
+# 共享 helper(含时区安全的 _millis);re-export 保持 `from ...comparison_task_service
+# import _millis`(test_audit_fixes 等)仍可用。
+from app.services.comparison_common import (  # noqa: F401
+    _require_db_user_id,
+    _new_id,
+    _json,
+    _loads,
+    _millis,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -515,7 +524,8 @@ async def lease_next_subtask(ext_token: str) -> Optional[dict]:
         "platform": candidate[2],
         "searchTerms": _loads(candidate[3]) or [],
         "requiredBrand": _required_brand_from_structure(candidate[4]),
-        "leasedUntil": int(leased_until.timestamp() * 1000),
+        # 时区安全:leased_until 来自 datetime.utcnow()(naive UTC),走 _millis 声明 UTC
+        "leasedUntil": _millis(leased_until),
     }
 
 
@@ -739,34 +749,5 @@ async def _refresh_task_status(session, subtask_id: str) -> None:
     )
 
 
-def _require_db_user_id(user_id: str) -> int:
-    db_user_id = _external_id_to_db_id(user_id)
-    if db_user_id is None:
-        raise ValueError("invalid user_id")
-    return db_user_id
-
-
-def _new_id(prefix: str) -> str:
-    return f"{prefix}_{uuid.uuid4().hex}"
-
-
-def _json(value) -> str:
-    return json.dumps(value, ensure_ascii=False)
-
-
-def _loads(value):
-    if value is None:
-        return None
-    if isinstance(value, (dict, list)):
-        return value
-    return json.loads(value)
-
-
-def _millis(value) -> int:
-    # DB 读出的是 naive datetime(代表 UTC 值)。裸 .timestamp() 会按运行机器本地
-    # 时区解释,非 UTC 容器上会偏整数小时;显式声明为 UTC,与机器时区解耦。
-    if not value:
-        return 0
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=timezone.utc)
-    return int(value.timestamp() * 1000)
+# _require_db_user_id / _new_id / _json / _loads / _millis 已抽到 comparison_common,
+# 见文件顶部的 re-export import。

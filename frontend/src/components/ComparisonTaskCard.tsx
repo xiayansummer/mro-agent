@@ -23,8 +23,11 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 export default function ComparisonTaskCard({ task, sessionId, onRefresh, onRetryPlatform, onNewComparison }: Props) {
-  const offers = task.subtasks.flatMap((subtask) =>
-    subtask.items.map((item) => ({ ...item, platform: subtask.platform }))
+  // 轮询链路的 task 来自未经校验的 JSON.parse,subtasks/items 可能缺失或非数组。
+  // 统一兜底成数组,避免一条脏 task 直接抛异常白屏(批量页此卡未被 ErrorBoundary 包裹)。
+  const subtasks = task.subtasks ?? [];
+  const offers = subtasks.flatMap((subtask) =>
+    (subtask.items ?? []).map((item) => ({ ...item, platform: subtask.platform }))
   ).sort(compareOffers);
   const progress = getTaskProgress(task);
 
@@ -43,8 +46,9 @@ export default function ComparisonTaskCard({ task, sessionId, onRefresh, onRetry
           </div>
         </div>
         <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
-          <button onClick={onNewComparison} style={buttonStyle}>🔄 换个产品比价</button>
-          <button onClick={onRefresh} style={buttonStyle}>刷新</button>
+          {/* 回调未传则不渲染,避免批量页出现点了无反应的死按钮 */}
+          {onNewComparison && <button onClick={onNewComparison} style={buttonStyle}>🔄 换个产品比价</button>}
+          {onRefresh && <button onClick={onRefresh} style={buttonStyle}>刷新</button>}
         </div>
       </div>
 
@@ -53,7 +57,7 @@ export default function ComparisonTaskCard({ task, sessionId, onRefresh, onRetry
       )}
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: offers.length ? 12 : 0 }}>
-        {task.subtasks.map((subtask) => (
+        {subtasks.map((subtask) => (
           <PlatformStatusChip
             key={subtask.id}
             subtask={subtask}
@@ -62,9 +66,9 @@ export default function ComparisonTaskCard({ task, sessionId, onRefresh, onRetry
         ))}
       </div>
 
-      {task.subtasks.some((subtask) => subtask.error) && (
+      {subtasks.some((subtask) => subtask.error) && (
         <div style={errorStyle}>
-          {task.subtasks
+          {subtasks
             .filter((subtask) => subtask.error)
             .map(formatSubtaskError)
             .join("；")}
@@ -91,11 +95,12 @@ function TaskProgress({
   task: ComparisonTask;
   progress: ReturnType<typeof getTaskProgress>;
 }) {
-  const activePlatforms = task.subtasks
+  const subtasks = task.subtasks ?? [];
+  const activePlatforms = subtasks
     .filter((subtask) => ["queued", "in_progress"].includes(subtask.status))
     .map((subtask) => PLATFORM_LABELS[subtask.platform])
     .join("、");
-  const updatedAt = Math.max(...task.subtasks.map((subtask) => subtask.updatedAt || subtask.createdAt || 0));
+  const updatedAt = Math.max(0, ...subtasks.map((subtask) => subtask.updatedAt || subtask.createdAt || 0));
 
   return (
     <div style={progressWrapStyle}>
@@ -125,10 +130,10 @@ function PlatformStatusChip({
   return (
     <span style={statusChipStyle(subtask.status)}>
       {PLATFORM_LABELS[subtask.platform]} · {STATUS_LABELS[subtask.status] || subtask.status}
-      {subtask.items.length ? ` · ${subtask.items.length} 条` : ""}
-      {retryable && (
+      {subtask.items?.length ? ` · ${subtask.items.length} 条` : ""}
+      {retryable && onRetryPlatform && (
         <button
-          onClick={() => onRetryPlatform?.(subtask.platform)}
+          onClick={() => onRetryPlatform(subtask.platform)}
           style={retryButtonStyle}
         >
           重试
@@ -235,17 +240,18 @@ function priceSortValue(offer: ExternalOffer) {
 }
 
 function getTaskProgress(task: ComparisonTask) {
-  const total = Math.max(task.subtasks.length, 1);
-  const doneCount = task.subtasks.filter((subtask) => subtask.status === "done").length;
-  const failedCount = task.subtasks.filter((subtask) =>
+  const subtasks = task.subtasks ?? [];
+  const total = Math.max(subtasks.length, 1);
+  const doneCount = subtasks.filter((subtask) => subtask.status === "done").length;
+  const failedCount = subtasks.filter((subtask) =>
     ["failed", "timeout", "login_required"].includes(subtask.status)
   ).length;
-  const runningCount = task.subtasks.filter((subtask) => subtask.status === "in_progress").length;
-  const queuedCount = task.subtasks.filter((subtask) => subtask.status === "queued").length;
+  const runningCount = subtasks.filter((subtask) => subtask.status === "in_progress").length;
+  const queuedCount = subtasks.filter((subtask) => subtask.status === "queued").length;
   const weighted = doneCount + failedCount + runningCount * 0.55 + queuedCount * 0.2;
   const percent = Math.max(8, Math.min(98, Math.round((weighted / total) * 100)));
   const isTerminal = ["done", "failed", "cancelled"].includes(task.status)
-    || task.subtasks.every((subtask) => ["done", "failed", "timeout", "login_required"].includes(subtask.status));
+    || subtasks.every((subtask) => ["done", "failed", "timeout", "login_required"].includes(subtask.status));
   let label = "正在比价";
   if (runningCount > 0) label = "Chrome 扩展正在抓取搜索结果";
   else if (queuedCount > 0) label = "等待 Chrome 扩展领取任务";

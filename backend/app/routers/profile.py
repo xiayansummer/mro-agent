@@ -2,6 +2,7 @@
 用户画像路由
 POST /api/profile/import  — 上传采购历史 Excel/CSV，写入 #preference memo
 """
+import asyncio
 import logging
 
 from fastapi import APIRouter, Depends, File, UploadFile, HTTPException
@@ -29,7 +30,9 @@ async def import_erp_history(
         raise HTTPException(status_code=400, detail="文件大小不能超过 10 MB")
 
     try:
-        rows = parse_rows(file_bytes, filename)
+        # openpyxl/csv 解析是 CPU 密集同步调用,放到线程池,避免阻塞事件循环
+        # (最大 10MB 文件在事件循环线程里整体解析会卡住全后端并发)。
+        rows = await asyncio.to_thread(parse_rows, file_bytes, filename)
     except Exception as e:
         raise HTTPException(status_code=400, detail="文件无法解析，请确认是有效的 Excel / CSV 文件") from e
     if not rows:

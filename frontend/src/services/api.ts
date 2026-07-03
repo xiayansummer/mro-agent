@@ -269,6 +269,7 @@ export interface CompareRowResponse {
   ok: boolean;
   taskId?: string;
   draftId?: string;
+  sessionId?: string;
   guidance?: string;
 }
 

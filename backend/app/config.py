@@ -24,6 +24,9 @@ class Settings:
     AI_BASE_URL: str = os.getenv("AI_BASE_URL", "")
     AI_MODEL: str = os.getenv("AI_MODEL", "qwen-plus")
     AI_VISION_MODEL: str = os.getenv("AI_VISION_MODEL", "qwen-vl-plus")
+    # 单次 LLM 请求超时(秒)。无超时时,一次挂起的 DashScope 往返会永久占住
+    # asyncio.to_thread 的线程池线程,单 worker 下线程池被拖满即全站卡死。
+    AI_TIMEOUT: float = float(os.getenv("AI_TIMEOUT", "60"))
 
     MEMOS_URL: str = os.getenv("MEMOS_URL", "http://localhost:5230")
     MEMOS_ACCESS_TOKEN: str = os.getenv("MEMOS_ACCESS_TOKEN", "")

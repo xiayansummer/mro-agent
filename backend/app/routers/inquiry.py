@@ -4,6 +4,7 @@ POST /api/inquiry/upload      — 上传 Excel/CSV，解析为结构化行(不�
 POST /api/inquiry/compare-row — 对一行需求触发三平台外部比价(京东/震坤行/西域)
 GET  /api/inquiry/template    — 下载询价模板
 """
+import asyncio
 import io
 import csv
 import os
@@ -110,7 +111,8 @@ async def upload_inquiry(
     if len(content) > 5 * 1024 * 1024:  # 5MB limit
         raise HTTPException(status_code=400, detail="文件过大，请控制在 5MB 以内")
 
-    rows = parse_excel_bytes(content, file.filename or "upload.xlsx")
+    # openpyxl/xlrd/csv 解析是 CPU 密集同步调用,放线程池避免阻塞事件循环
+    rows = await asyncio.to_thread(parse_excel_bytes, content, file.filename or "upload.xlsx")
     if not rows:
         raise HTTPException(
             status_code=422,
@@ -170,4 +172,6 @@ async def compare_inquiry_row(
     task = await start_draft(draft["id"], user_id)
     if not task:
         return {"ok": False, "guidance": "比价任务创建失败,请重试"}
-    return {"ok": True, "taskId": task["id"], "draftId": draft["id"]}
+    # 返回 sessionId,让前端把它传给 ComparisonTaskCard → OfferRow,
+    # 使批量页的"标记不合适"反馈能真正落库(否则 sessionId 缺失时静默 no-op)。
+    return {"ok": True, "taskId": task["id"], "draftId": draft["id"], "sessionId": session_id}

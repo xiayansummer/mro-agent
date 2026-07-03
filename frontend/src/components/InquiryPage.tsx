@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { authHeader } from "../services/auth";
 import { compareInquiryRow, getComparisonTask } from "../services/api";
 import ComparisonTaskCard from "./ComparisonTaskCard";
+import ErrorBoundary from "./ErrorBoundary";
 import { ComparisonTask } from "../types";
 
 interface InquiryRow {
@@ -46,15 +47,24 @@ function formatTime(ts: number) {
   return new Date(ts).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
+function csvCell(value: string | number): string {
+  let s = String(value ?? "");
+  // \u4E2D\u548C CSV \u516C\u5F0F\u6CE8\u5165:\u4EE5 = + - @ \u6216 \u5236\u8868/\u56DE\u8F66 \u5F00\u5934\u7684\u5355\u5143\u683C,Excel/Sheets \u4F1A\u5F53\u516C\u5F0F\u6267\u884C
+  // (\u5982\u5546\u54C1\u6807\u9898 "=cmd|...");\u524D\u7F6E\u5355\u5F15\u53F7\u4F7F\u5176\u88AB\u5F53\u4F5C\u7EAF\u6587\u672C\u3002
+  if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+  return `"${s.replace(/"/g, '""')}"`;
+}
+
 function downloadCSV(headers: (string | number)[], rows: (string | number)[][], filename: string) {
-  const csv = [headers, ...rows].map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
+  const csv = [headers, ...rows].map((r) => r.map(csvCell).join(",")).join("\n");
   const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
   a.download = filename;
   a.click();
-  URL.revokeObjectURL(url);
+  // \u5EF6\u8FDF\u91CA\u653E:\u90E8\u5206\u6D4F\u89C8\u5668\u4E0B\u540C\u6B65 revoke \u4F1A\u8D76\u5728\u4E0B\u8F7D\u771F\u6B63\u5F00\u59CB\u524D\u91CA\u653E URL \u5BFC\u81F4\u5BFC\u51FA\u5931\u8D25
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 export default function InquiryPage({ onToggleSidebar }: { onToggleSidebar?: () => void }) {
@@ -74,6 +84,7 @@ export default function InquiryPage({ onToggleSidebar }: { onToggleSidebar?: () 
     task: ComparisonTask | null;
     loading: boolean;
     error?: string;
+    sessionId?: string;  // 传给 ComparisonTaskCard 使反馈能落库
   }
   const [rowCompare, setRowCompare] = useState<Map<number, RowCompare>>(new Map());
   // 当前展示的 result 对应的 history 条目 id,持久化 compareTaskId 时定位该条目
@@ -238,7 +249,7 @@ export default function InquiryPage({ onToggleSidebar }: { onToggleSidebar?: () 
         }));
         return;
       }
-      setRowCompare((prev) => new Map(prev).set(row.index, { taskId: resp.taskId!, task: null, loading: false }));
+      setRowCompare((prev) => new Map(prev).set(row.index, { taskId: resp.taskId!, task: null, loading: false, sessionId: resp.sessionId }));
       persistCompareTaskId(row.index, resp.taskId!);
     } catch {
       setRowCompare((prev) => new Map(prev).set(row.index, {
@@ -261,7 +272,7 @@ export default function InquiryPage({ onToggleSidebar }: { onToggleSidebar?: () 
             setRowCompare((prev) => new Map(prev).set(row.index, { taskId: "", task: null, loading: false, error: resp.guidance || "无法比价" }));
             continue;
           }
-          setRowCompare((prev) => new Map(prev).set(row.index, { taskId: resp.taskId!, task: null, loading: false }));
+          setRowCompare((prev) => new Map(prev).set(row.index, { taskId: resp.taskId!, task: null, loading: false, sessionId: resp.sessionId }));
           persistCompareTaskId(row.index, resp.taskId!, historyId);
         } catch {
           setRowCompare((prev) => new Map(prev).set(row.index, { taskId: "", task: null, loading: false, error: "比价启动失败" }));
@@ -609,7 +620,14 @@ export default function InquiryPage({ onToggleSidebar }: { onToggleSidebar?: () 
                           const rc = rowCompare.get(row.index);
                           if (!rc || (rc.loading && !rc.task)) return <div style={{ fontSize: 12.5, color: "var(--text-muted)" }}>正在发起外部比价…</div>;
                           if (rc.error) return <div style={{ fontSize: 12.5, color: "#b45309" }}>{rc.error}</div>;
-                          if (rc.task) return <ComparisonTaskCard task={rc.task} />;
+                          if (rc.task) return (
+                            <ErrorBoundary
+                              label="inquiry-compare-card"
+                              resetKeys={[rc.task.status, rc.task.subtasks?.length ?? 0]}
+                            >
+                              <ComparisonTaskCard task={rc.task} sessionId={rc.sessionId} />
+                            </ErrorBoundary>
+                          );
                           return <div style={{ fontSize: 12.5, color: "var(--text-muted)" }}>正在查询…</div>;
                         })()}
                       </div>

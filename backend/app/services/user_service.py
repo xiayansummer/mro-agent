@@ -60,7 +60,14 @@ async def register_user(phone: str, nickname: Optional[str]) -> dict:
 
 
 async def login_user(phone: str) -> Optional[dict]:
-    """Refresh auth_token + last_login_at for existing user. Returns updated user or None."""
+    """Refresh auth_token + last_login_at for existing user. Returns updated user or None.
+
+    ⚠️ 已知设计取舍(M-13,纯内网部署,2026-07 评审接受维持现状):
+    - 仅凭手机号登录,无密码/OTP——知道注册手机号即可登录该账号。
+    - auth_token 明文列存于 t_user、无 TTL(对照 extension token 走 sha256 哈希)。
+    彻底加固(登录加 OTP/密码、token 哈希+过期)牵涉前后端与产品流程,列为 C 档待决策项,
+    非"未察觉的 bug"。改动前请重开该决策,勿在架构 review 里当新问题重复提出。
+    """
     user = await get_user_by_phone(phone)
     if not user:
         return None

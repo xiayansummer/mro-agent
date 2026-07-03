@@ -307,7 +307,13 @@ export default function ChatWindow({ sessionId, messages, onMessagesChange, onTo
       >
         <div style={{ maxWidth: 780, margin: "0 auto" }}>
           {displayMessages.map((msg, i) => (
-            <ErrorBoundary key={msg.id} label={`message ${msg.id}`}>
+            <ErrorBoundary
+              key={msg.id}
+              label={`message ${msg.id}`}
+              /* 流式内容增长时清除错误态:某个中间 chunk 的半截形状渲染抛错后,
+                 后续 chunk 补全时能自动恢复,而非永久停在兜底 UI */
+              resetKeys={[msg.content?.length ?? 0, msg.comparisonTask?.subtasks?.length ?? 0]}
+            >
               <MessageBubble
                 message={msg}
                 isFirst={i === 0}

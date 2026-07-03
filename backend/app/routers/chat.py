@@ -16,13 +16,10 @@ from pydantic import BaseModel
 from app.routers.auth import require_user_id
 from app.services import chat_history_service
 from app.services.agent import handle_message
+from app.services.background import spawn_background
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
-
-# Hold strong refs to fire-and-forget tasks so the GC can't collect them mid-flight
-# (the event loop only keeps weak refs). Tasks self-remove on completion.
-_background_tasks: set = set()
 
 
 class ChatRequest(BaseModel):
@@ -103,7 +100,7 @@ async def _capturing_stream(
         # Persist after the stream ends (also runs on client disconnect)
         assistant_text = "".join(text_parts)
         # Don't await — fire and forget, don't block the response close
-        _task = asyncio.ensure_future(
+        spawn_background(
             chat_history_service.save_turn(
                 session_id=session_id,
                 user_id=user_id,
@@ -117,8 +114,6 @@ async def _capturing_stream(
                 refined_offers=refined_offers,
             )
         )
-        _background_tasks.add(_task)
-        _task.add_done_callback(_background_tasks.discard)
 
 
 @router.post("/chat")

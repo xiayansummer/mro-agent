@@ -56,7 +56,13 @@ async def fetch_ehsy_offers(search_term: str, limit: int = 8) -> list[dict]:
         return []
     offers = []
     for i, p in enumerate(raw):
-        o = _to_external_offer(p, i)
+        # 逐条兜底:单个畸形商品(缺字段/类型异常)不应拖垮整批映射。
+        # 原实现把映射循环放在 try 外,search_ehsy 又永不抛,故映射异常从无保护。
+        try:
+            o = _to_external_offer(p, i)
+        except Exception:
+            logger.warning("ehsy offer 映射失败,跳过该条: %r", p, exc_info=True)
+            continue
         if o:
             offers.append(o)
     return offers

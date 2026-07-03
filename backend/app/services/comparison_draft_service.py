@@ -12,7 +12,16 @@ from app.models.comparison import (
 )
 from app.services.comparison_query_builder import build_search_terms
 from app.services.comparison_structure import build_comparison_structure
-from app.services.user_service import _external_id_to_db_id
+from app.services.user_service import _external_id_to_db_id  # noqa: F401 — kept for back-compat re-export
+# 共享 helper(含时区安全的 _millis);re-export 使 routers/inquiry.py 的
+# `from ...comparison_draft_service import _require_db_user_id` 仍可用。
+from app.services.comparison_common import (  # noqa: F401
+    _require_db_user_id,
+    _new_id,
+    _json,
+    _loads,
+    _millis,
+)
 
 
 async def create_draft_from_message(
@@ -160,29 +169,7 @@ def _row_to_draft(row) -> dict:
         "searchTerms": _loads(row[5]) or {},
         "platformStatus": _loads(row[6]) if row[6] else None,
         "status": row[7],
-        "createdAt": int(row[8].timestamp() * 1000) if row[8] else 0,
-        "updatedAt": int(row[9].timestamp() * 1000) if row[9] else 0,
+        # 时区安全:统一走 _millis(裸 .timestamp() 在非 UTC 容器上会偏整数小时)
+        "createdAt": _millis(row[8]),
+        "updatedAt": _millis(row[9]),
     }
-
-
-def _require_db_user_id(user_id: str) -> int:
-    db_user_id = _external_id_to_db_id(user_id)
-    if db_user_id is None:
-        raise ValueError("invalid user_id")
-    return db_user_id
-
-
-def _new_id(prefix: str) -> str:
-    return f"{prefix}_{uuid.uuid4().hex}"
-
-
-def _json(value) -> str:
-    return json.dumps(value, ensure_ascii=False)
-
-
-def _loads(value):
-    if value is None:
-        return None
-    if isinstance(value, (dict, list)):
-        return value
-    return json.loads(value)

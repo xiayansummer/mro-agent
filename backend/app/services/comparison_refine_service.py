@@ -7,7 +7,8 @@ parse_refinement / apply_refinement 都是纯函数,无 IO,便于单测。
 import re
 from typing import Optional
 
-from app.services.comparison_ranker import text_matches_brand
+# 直接从真源 normalization 导入,不再经 comparison_ranker 借道(避免 refine→ranker 假耦合)
+from app.services.normalization import text_matches_brand
 
 _CN_NUM = {"一": 1, "两": 2, "二": 2, "三": 3, "四": 4, "五": 5,
            "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}

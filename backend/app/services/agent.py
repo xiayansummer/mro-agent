@@ -6,15 +6,13 @@ from collections.abc import AsyncGenerator
 
 from app.services import chat_history_service, comparison_draft_service, comparison_refine_service, comparison_task_service
 from app.services.memory_service import memory_service
+from app.services.background import spawn_background
 
 logger = logging.getLogger(__name__)
 
 # 内存会话上限:防止 _sessions 字典与单会话 conversation 无界增长(慢速内存泄漏)。
 _MAX_SESSIONS = 500
 _MAX_CONVERSATION = 12
-
-# Hold strong refs to fire-and-forget tasks so the GC can't collect them mid-flight.
-_background_tasks: set = set()
 
 
 def _slot_context_summary(slot: dict) -> str:
@@ -205,7 +203,7 @@ async def handle_message(
     ctx["conversation"].append({"role": "user", "content": user_message})
     ctx["conversation"].append({"role": "assistant", "content": f"[已创建比价草稿: {product_type}]"})
 
-    _task = asyncio.ensure_future(
+    spawn_background(
         memory_service.save_session_summary(
             user_id=effective_user_id,
             user_message=user_message,
@@ -215,7 +213,5 @@ async def handle_message(
             query_type=parsed.get("query_type", "comparison"),
         )
     )
-    _background_tasks.add(_task)
-    _task.add_done_callback(_background_tasks.discard)
 
     yield "event: done\ndata: \n\n"

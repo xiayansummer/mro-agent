@@ -11,7 +11,12 @@ from app.services.normalization import (
 )
 
 logger = logging.getLogger(__name__)
-client = OpenAI(api_key=settings.AI_API_KEY, base_url=settings.AI_BASE_URL)
+client = OpenAI(
+    api_key=settings.AI_API_KEY,
+    base_url=settings.AI_BASE_URL,
+    timeout=settings.AI_TIMEOUT,
+    max_retries=1,
+)
 
 SYSTEM_PROMPT = """你是一个资深的MRO（工业品）采购专家。你的任务是将用户的自然语言描述解析为结构化的搜索参数。
 

@@ -310,28 +310,15 @@ def _comparison_slot_clarification(parsed: dict, structure: ComparisonStructure)
         ]
     )
 
-    if _is_threaded_fastener(structure):
-        if not spec.size:
-            missing.append({
-                "key": "size",
-                "icon": "📏",
-                "question": "需要什么规格尺寸？",
-                "options": ["M6", "M8", "M10", "M12", "其他规格"],
-            })
-        if _needs_strength_grade(parsed, structure, spec_text):
-            missing.append({
-                "key": "strength_grade",
-                "icon": "⚙️",
-                "question": "需要什么强度等级？",
-                "options": _strength_options(structure),
-            })
-        if not spec.material and not any(token in raw_text for token in ["碳钢", "不锈钢", "304", "316", "合金钢"]):
-            missing.append({
-                "key": "material",
-                "icon": "🔧",
-                "question": "需要什么材质？",
-                "options": ["碳钢", "304不锈钢", "316不锈钢", "合金钢", "其他材质"],
-            })
+    # 品类专属追问:数据驱动(见 _CATEGORY_SLOT_RULES),不再按品类硬编码 if 分支。
+    ctx = {"spec_text": spec_text, "raw_text": raw_text}
+    for rule in _CATEGORY_SLOT_RULES:
+        if not rule["match"](structure):
+            continue
+        for dimension in rule["dimensions"]:
+            slot = dimension(parsed, structure, ctx)
+            if slot:
+                missing.append(slot)
     if _should_ask_brand(parsed, structure, len(missing)):
         missing.append({
             "key": "brand",
@@ -427,6 +414,41 @@ def _strength_options(structure: ComparisonStructure) -> list[str]:
     if "螺母" in text:
         return ["4级", "6级", "8级", "10级", "12级"]
     return ["4.8级", "8.8级", "10.9级", "12.9级", "其他等级"]
+
+
+# ── 品类专属追问规则(数据驱动)────────────────────────────────────────────
+# 每个条目 = 品类匹配条件 + 待确认维度列表。新增品类(如轴承问内外径/精度等级)只需
+# 在此加一条数据 + 对应维度函数,不再往 _comparison_slot_clarification 里加 if 分支,
+# 遵循"勿按品类特判硬编码"原则。维度函数返回 slot dict(要追问)或 None(已知/不适用)。
+def _dim_fastener_size(parsed: dict, structure: ComparisonStructure, ctx: dict) -> Optional[dict]:
+    if structure.specification.size:
+        return None
+    return {"key": "size", "icon": "📏", "question": "需要什么规格尺寸？",
+            "options": ["M6", "M8", "M10", "M12", "其他规格"]}
+
+
+def _dim_fastener_strength(parsed: dict, structure: ComparisonStructure, ctx: dict) -> Optional[dict]:
+    if not _needs_strength_grade(parsed, structure, ctx["spec_text"]):
+        return None
+    return {"key": "strength_grade", "icon": "⚙️", "question": "需要什么强度等级？",
+            "options": _strength_options(structure)}
+
+
+def _dim_fastener_material(parsed: dict, structure: ComparisonStructure, ctx: dict) -> Optional[dict]:
+    if structure.specification.material:
+        return None
+    if any(token in ctx["raw_text"] for token in ["碳钢", "不锈钢", "304", "316", "合金钢"]):
+        return None
+    return {"key": "material", "icon": "🔧", "question": "需要什么材质？",
+            "options": ["碳钢", "304不锈钢", "316不锈钢", "合金钢", "其他材质"]}
+
+
+_CATEGORY_SLOT_RULES = [
+    {
+        "match": _is_threaded_fastener,
+        "dimensions": [_dim_fastener_size, _dim_fastener_strength, _dim_fastener_material],
+    },
+]
 
 
 def _should_ask_brand(parsed: dict, structure: ComparisonStructure, missing_count: int) -> bool:

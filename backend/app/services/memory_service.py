@@ -20,11 +20,9 @@ import httpx
 
 from app.config import settings
 from app.services import user_service
+from app.services.background import spawn_background
 
 logger = logging.getLogger(__name__)
-
-# Hold strong refs to fire-and-forget tasks so the GC can't collect them mid-flight.
-_background_tasks: set = set()
 
 
 class MemoryService:
@@ -34,7 +32,6 @@ class MemoryService:
 
     def __init__(self):
         self._token: Optional[str] = None
-        self._client: Optional[httpx.AsyncClient] = None
         # user_id -> (monotonic_ts, skus)
         self._disliked_cache: dict[str, tuple[float, list[str]]] = {}
 
@@ -233,9 +230,7 @@ class MemoryService:
             new_count = await user_service.increment_session_count(user_id)
             if new_count is not None and new_count % 10 == 0:
                 logger.info(f"Memos: triggering preference memo update for user {user_id[:8]} (session #{new_count})")
-                _task = asyncio.ensure_future(self.update_preference_memo(user_id))
-                _background_tasks.add(_task)
-                _task.add_done_callback(_background_tasks.discard)
+                spawn_background(self.update_preference_memo(user_id))
         except Exception as e:
             logger.error(f"Memos: increment_session_count failed: {e}")
 

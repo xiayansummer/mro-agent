@@ -106,7 +106,7 @@ def _score_offer(structure: dict, offer: dict, index: int, preferences: dict | N
         reasons.append(f"规格匹配：{size}")
 
     standard = _clean(structure.get("specification", {}).get("standard"))
-    if standard and _compact(standard) in _compact(haystack):
+    if standard and _code_key(standard) in _code_key(haystack):
         score += 8
         reasons.append(f"标准匹配：{standard}")
 
@@ -238,6 +238,13 @@ def _compact(value: str) -> str:
     # 统一小写:_offer_text(haystack)已转小写,这里也必须小写,否则含大写字母的英文
     # 参数(型号 HSZ-622A、标准 DIN933 等)子串匹配会失效。
     return re.sub(r"\s+", "", _clean(value)).lower()
+
+
+def _code_key(value: str) -> str:
+    # 标准号/编码归一:去空格与分隔符(/ - .)再小写,使
+    # "GB/T 5783" ≡ "GBT5783" ≡ "gb/t5783" 能互相匹配。_compact 只去空格保留分隔符,
+    # 会漏掉写法不同的等效标准码(标准比价的核心域数据),故标准匹配改用此归一。
+    return re.sub(r"[\s/.\-]+", "", _clean(value)).lower()
 
 
 def _clean(value: Any) -> str:
