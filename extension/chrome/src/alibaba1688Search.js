@@ -1,4 +1,9 @@
-import { parse1688SearchPage, is1688SearchResultUrl, classify1688Page } from "./alibaba1688Parser.js";
+import {
+  collect1688RawCards,
+  parse1688SearchPage,
+  is1688SearchResultUrl,
+  classify1688Page,
+} from "./alibaba1688Parser.js";
 import { hasBrandMatch, normalizeRequiredBrand } from "./brandMatch.js";
 
 const MAX_RESULTS_PER_TERM = 10;
@@ -93,13 +98,19 @@ async function collect1688(searchTerm) {
     while (Date.now() < deadline) {
       await sleep(900);
       try {
+        // 注入的是"只做 DOM 采集"的自包含函数;解析(标题/价格)在后台做,
+        // 避免注入函数引用模块级 helper 导致页面里 ReferenceError(这是首次抓到 0 结果的根因)。
         const [res] = await chrome.scripting.executeScript({
           target: { tabId: tab.id },
-          func: parse1688SearchPage,
+          func: collect1688RawCards,
           args: [MAX_RESULTS_PER_TERM],
         });
-        last = res?.result || last;
-        if ((last.offers && last.offers.length > 0) || last.hasLoginWall) break;
+        const page = parse1688SearchPage(
+          res?.result || { url: "", cards: [], hasLoginWall: false },
+          MAX_RESULTS_PER_TERM,
+        );
+        last = page;
+        if ((page.offers && page.offers.length > 0) || page.hasLoginWall) break;
       } catch (_e) {
         // 导航中,忽略本次,继续轮询
       }

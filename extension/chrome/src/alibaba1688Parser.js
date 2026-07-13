@@ -1,20 +1,23 @@
 /**
  * 1688 搜索结果页解析器。
  *
- * ⚠️ 2026-07-13 用浏览器自动化读真实页(搜"外六角螺栓")校准得出的关键事实:
- * 1688 列表页 DOM **class 全混淆/为空、无 data-* 属性**(反爬),所以**不能靠 class 选择器**
- * (与 jd/zkh 不同),改用**结构 + 文本模式**:
+ * ⚠️ 2026-07-13 用浏览器自动化 + 真机端到端校准得出的关键事实:
+ * 1688 列表页 DOM **class 全混淆/为空、无 data-* 属性、img alt/title 也空**(反爬),所以
+ * **不能靠 class 选择器**(与 jd/zkh 不同),改用**结构 + 文本模式**:
  *  - 商品卡片 = 指向商品详情的 <a>(href 含 detail.1688.com / dj.1688.com / /offer/数字 / /数字.html)
  *    且卡片内含 alicdn 图。用 href 锚定单商品卡片,天然区隔广告 banner。
- *  - 标题 = 卡片内最长的中文文本节点。
- *  - 价格 = 卡片内 ¥[数字](区间取下限,否则起批单价)→ parsePrice。真实页多为单个起批价(如 ¥0.25)。
- *  - 起订量 = 卡片内 "N件起" 文本;**列表页常常没有**→有则取、没有留空(真起订量/阶梯档要进详情页,范围外)。
- *  - 过滤"广告"卡片。
- * 注:浏览器自动化工具出于隐私会屏蔽 href/outerHTML,但**扩展 content script 环境读得到完整 href**,
- * 所以用 href 锚定卡片在扩展里可行。线上准确度需装扩展后在真实页迭代(见 1688-calibrate.console.js)。
+ *  - 价格被拆成 ¥/整数/小数 多个相邻文本节点;标题恒在价格节点之前、成交计数/物流标签恒在其后。
+ *    故标题 = 价格节点前的非噪声叶子拼接;价格 = 从 ¥ 节点起拼接紧邻纯数字片段。
+ *  - 起订量列表页常无 → 有则取、无则空(真起订量/阶梯档要进详情页,范围外)。
+ *
+ * 架构(关键):**DOM 采集与解析分离**。
+ *  - `collect1688RawCards` 注入页面执行(chrome.scripting.executeScript 只序列化本函数源码,
+ *    引用模块作用域会在页面里 ReferenceError——jd/zkh 的注入函数都自包含就是这个原因),
+ *    因此它**自包含、只做 DOM 采集**,返回每卡的原始 {leaves,href,imageUrl} + 页面元信息。
+ *  - `parse1688SearchPage` 在**后台(扩展上下文)**跑,吃 collect 的原始数据、用下面这些模块级
+ *    纯函数(可单测)产出 offer。这样校准逻辑(extractTitle/extractPriceText 等)有单测、且不重复。
  */
 
-const OFFER_HREF_RE = /detail\.1688\.com|dj\.1688\.com|1688\.com\/offer\/|\/\d{9,}\.html/i;
 const PRICE_RE = /(?:¥|￥)\s*([\d.]+)(?:\s*[-~至]\s*([\d.]+))?/;
 const MOQ_RE = /(\d+)\s*(件|个|套|米|千克|kg|双|只|条|包|箱|卷|张)\s*起(?:批|订|拍)?/;
 
@@ -32,15 +35,6 @@ export function parsePrice(text) {
 export function parseMoq(text) {
   const m = (text || "").match(MOQ_RE);
   return m ? `≥${m[1]}${m[2]}` : "";
-}
-
-// 卡片内所有叶子文本节点,按文档顺序。1688 把标题/属性/价格碎片/销量拆成很多相邻节点,
-// 逐节点处理比对整卡 textContent 做正则更稳(整卡拼接会把价格和后面的销量数字粘连)。
-export function leafTexts(card) {
-  return [...card.querySelectorAll("*")]
-    .filter((el) => !el.children.length)
-    .map((el) => (el.textContent || "").trim())
-    .filter(Boolean);
 }
 
 // 噪声叶子:促销/物流标签、公司名、成交计数、百分比、分隔符。实测这些混在标题区之外,
@@ -95,23 +89,51 @@ export function extractPriceText(leaves) {
   return s;
 }
 
-function cardImageUrl(card) {
-  const img = card.querySelector("img[src*='alicdn'], img[data-src*='alicdn'], img");
-  let src = img?.getAttribute("src") || img?.getAttribute("data-src") || "";
-  if (src.startsWith("//")) src = "https:" + src;
-  return src;
-}
-
-/** 解析当前搜索结果页 → {url, offers:[{title,priceValue,priceText,moq,imageUrl,productUrl,brand}], hasLoginWall, hasPriceSignal}。 */
-export function parse1688SearchPage(limit = 10) {
-  const seen = new Set();
-  const offers = [];
-  const cards = [...document.querySelectorAll("a[href]")].filter(
+/**
+ * 注入页面执行:只做 DOM 采集,返回 {url, cards:[{leaves,href,imageUrl}], hasLoginWall}。
+ * **必须自包含**(不引用任何模块级符号)——executeScript 只序列化本函数源码,页面里没有模块作用域。
+ * 解析(标题/价格/起订量)交给后台的 parse1688SearchPage,便于单测且不重复逻辑。
+ */
+export function collect1688RawCards(limit = 10) {
+  const OFFER_HREF_RE = /detail\.1688\.com|dj\.1688\.com|1688\.com\/offer\/|\/\d{9,}\.html/i;
+  const leafTexts = (card) =>
+    [...card.querySelectorAll("*")]
+      .filter((el) => !el.children.length)
+      .map((el) => (el.textContent || "").trim())
+      .filter(Boolean);
+  const imageUrlOf = (card) => {
+    const img = card.querySelector("img[src*='alicdn'], img[data-src*='alicdn'], img");
+    let src = (img && (img.getAttribute("src") || img.getAttribute("data-src"))) || "";
+    if (src.startsWith("//")) src = "https:" + src;
+    return src;
+  };
+  const anchors = [...document.querySelectorAll("a[href]")].filter(
     (a) => OFFER_HREF_RE.test(a.href) && a.querySelector("img"),
   );
+  const cards = [];
+  for (const a of anchors) {
+    if (cards.length >= limit * 2) break; // 多采些,去重/上限后台再收
+    cards.push({ leaves: leafTexts(a), href: a.href, imageUrl: imageUrlOf(a) });
+  }
+  const bodyText = (document.body && document.body.innerText) || "";
+  return {
+    url: location.href,
+    cards,
+    hasLoginWall: /(亲[，,]\s*)?请登录|安全验证|滑动验证|拖动滑块/.test(bodyText),
+  };
+}
+
+/**
+ * 后台解析:吃 collect1688RawCards 的原始数据 → {url, offers, hasLoginWall, hasPriceSignal}。
+ * offer = {title, priceValue, priceText, moq, imageUrl, productUrl, brand}。纯数据入参、无 DOM,可单测。
+ */
+export function parse1688SearchPage(raw, limit = 10) {
+  const cards = (raw && raw.cards) || [];
+  const seen = new Set();
+  const offers = [];
   for (const card of cards) {
     if (offers.length >= limit) break;
-    const leaves = leafTexts(card);
+    const leaves = card.leaves || [];
     const title = extractTitle(leaves);
     if (!title) continue;
     const key = card.href || title;
@@ -123,16 +145,16 @@ export function parse1688SearchPage(limit = 10) {
       priceValue,
       priceText,
       moq: parseMoq(leaves.join(" ")),
-      imageUrl: cardImageUrl(card),
-      productUrl: card.href,
+      imageUrl: card.imageUrl || "",
+      productUrl: card.href || "",
       brand: null,
     });
   }
-  const bodyText = document.body?.innerText || "";
   return {
-    url: location.href,
+    url: (raw && raw.url) || "",
     offers,
-    hasLoginWall: offers.length === 0 && /(亲[，,]\s*)?请登录|安全验证|滑动验证|拖动滑块/.test(bodyText),
+    // 登录墙只在完全没抓到 offer 时才断言(有 offer 说明页面正常渲染了结果)。
+    hasLoginWall: offers.length === 0 && !!(raw && raw.hasLoginWall),
     hasPriceSignal: offers.some((o) => o.priceValue != null),
   };
 }

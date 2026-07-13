@@ -6,6 +6,7 @@ import {
   classify1688Page,
   extractTitle,
   extractPriceText,
+  parse1688SearchPage,
 } from "./alibaba1688Parser.js";
 
 test("parsePrice 起批单价(真实页全角￥+空格格式,规范化输出)", () => {
@@ -87,4 +88,38 @@ test("classify1688Page 登录墙/空/正常", () => {
   assert.equal(classify1688Page({ isSearchUrl: true, validOfferCount: 5, hasLoginWall: false }), "ok");
   assert.equal(classify1688Page({ isSearchUrl: true, validOfferCount: 0, hasLoginWall: true }), "login_required");
   assert.equal(classify1688Page({ isSearchUrl: true, validOfferCount: 0, hasLoginWall: false }), "empty");
+});
+
+test("parse1688SearchPage 吃 collect 原始数据产出 offer(全链路,无 DOM)", () => {
+  const raw = {
+    url: "https://s.1688.com/selloffer/offer_search.htm?keywords=x",
+    hasLoginWall: false,
+    cards: [
+      { leaves: REAL_CARD_LEAVES, href: "https://detail.1688.com/offer/111.html", imageUrl: "https://x.alicdn.com/a.jpg" },
+      { leaves: ["六角", "螺栓", "¥", "2", ".3", "退货包运费"], href: "https://detail.1688.com/offer/222.html", imageUrl: "" },
+    ],
+  };
+  const page = parse1688SearchPage(raw, 10);
+  assert.equal(page.offers.length, 2);
+  assert.ok(page.offers[0].title.startsWith("304不锈钢内六角螺丝"));
+  assert.equal(page.offers[0].priceValue, 0.05);
+  assert.equal(page.offers[0].productUrl, "https://detail.1688.com/offer/111.html");
+  assert.equal(page.offers[1].title, "六角螺栓");
+  assert.equal(page.offers[1].priceValue, 2.3);
+  assert.equal(page.hasPriceSignal, true);
+  assert.equal(page.hasLoginWall, false);
+});
+
+test("parse1688SearchPage 去重(同 href)+ 尊重 limit", () => {
+  const card = { leaves: ["外六角螺栓", "¥", "1", ".2"], href: "https://detail.1688.com/offer/1.html", imageUrl: "" };
+  const page = parse1688SearchPage({ url: "u", hasLoginWall: false, cards: [card, card, card] }, 10);
+  assert.equal(page.offers.length, 1); // 同 href 去重
+  const many = Array.from({ length: 5 }, (_, i) => ({ leaves: ["螺栓", "¥", "1"], href: `h${i}`, imageUrl: "" }));
+  assert.equal(parse1688SearchPage({ url: "u", cards: many }, 3).offers.length, 3); // limit
+});
+
+test("parse1688SearchPage 无卡片 + 登录墙信号 → hasLoginWall", () => {
+  const page = parse1688SearchPage({ url: "u", cards: [], hasLoginWall: true }, 10);
+  assert.equal(page.offers.length, 0);
+  assert.equal(page.hasLoginWall, true);
 });
