@@ -15,7 +15,8 @@ def test_comparison_structure_defaults():
 
     assert structure.category.confidence == 0.0
     assert structure.specification.attributes == []
-    assert structure.purchaseConstraints.preferredPlatforms == ["jd", "zkh", "ehsy", "1688"]
+    # 灰度期默认三平台(1688 已注册但 default=False,详见 test_platforms)
+    assert structure.purchaseConstraints.preferredPlatforms == ["jd", "zkh", "ehsy"]
     assert structure.searchTerms.get("jd") == []
     assert structure.searchTerms.get("zkh") == []
 
@@ -65,7 +66,7 @@ def test_platform_accepts_ehsy():
 
 def test_structure_default_platforms_include_ehsy():
     s = ComparisonStructure()
-    assert s.purchaseConstraints.preferredPlatforms == ["jd", "zkh", "ehsy", "1688"]
+    assert s.purchaseConstraints.preferredPlatforms == ["jd", "zkh", "ehsy"]
 
 
 def test_search_terms_is_dict_and_dumps_flat():
@@ -81,5 +82,9 @@ def test_search_terms_reads_legacy_jd_zkh_only():
     assert st.get("jd") == ["x"] and st.get("1688") == []
 
 
-def test_preferred_platforms_default_includes_1688():
-    assert PurchaseConstraints().preferredPlatforms == ["jd", "zkh", "ehsy", "1688"]
+def test_preferred_platforms_default_gates_1688_off():
+    # 灰度:1688 不在默认平台(现网默认不触发 1688),但仍是合法 Platform(见
+    # test_search_terms_is_dict_and_dumps_flat / test_external_offer 接受 1688)。
+    default = PurchaseConstraints().preferredPlatforms
+    assert default == ["jd", "zkh", "ehsy"]
+    assert "1688" not in default

@@ -2,8 +2,17 @@ from app import platforms
 
 
 def test_registry_has_four_platforms_incl_1688():
+    # 注册表始终覆盖全量 4 平台(Literal 校验/别名/中文名/collector 都据此),
+    # 后端因此"认识"1688;是否默认触发由 default 开关另行控制(见下)。
     assert set(platforms.PLATFORM_REGISTRY) == {"jd", "zkh", "ehsy", "1688"}
-    assert platforms.DEFAULT_PLATFORMS == ["jd", "zkh", "ehsy", "1688"]
+
+
+def test_default_platforms_gated_1688_off_until_rollout():
+    # 灰度开关:1688 已注册但 default=False → 不进默认列表(现网默认仍三平台,
+    # 不会自动多 1688 列);扩展铺开后把 registry 里 1688 的 default 翻 True 即变四平台默认。
+    assert platforms.DEFAULT_PLATFORMS == ["jd", "zkh", "ehsy"]
+    assert platforms.PLATFORM_REGISTRY["1688"]["default"] is False
+    assert all(platforms.PLATFORM_REGISTRY[p]["default"] for p in ("jd", "zkh", "ehsy"))
 
 
 def test_alias_to_id_maps_all_aliases():
