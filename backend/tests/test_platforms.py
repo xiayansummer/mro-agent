@@ -7,12 +7,11 @@ def test_registry_has_four_platforms_incl_1688():
     assert set(platforms.PLATFORM_REGISTRY) == {"jd", "zkh", "ehsy", "1688"}
 
 
-def test_default_platforms_gated_1688_off_until_rollout():
-    # 灰度开关:1688 已注册但 default=False → 不进默认列表(现网默认仍三平台,
-    # 不会自动多 1688 列);扩展铺开后把 registry 里 1688 的 default 翻 True 即变四平台默认。
-    assert platforms.DEFAULT_PLATFORMS == ["jd", "zkh", "ehsy"]
-    assert platforms.PLATFORM_REGISTRY["1688"]["default"] is False
-    assert all(platforms.PLATFORM_REGISTRY[p]["default"] for p in ("jd", "zkh", "ehsy"))
+def test_default_platforms_all_four_after_1688_rollout():
+    # 2026-07-13 扩展 1688 端到端校准通过,default 翻 True → 比价默认四平台。
+    # (default 开关架构保留,将来新平台仍可先 False 灰度、验证后翻 True。)
+    assert platforms.DEFAULT_PLATFORMS == ["jd", "zkh", "ehsy", "1688"]
+    assert all(platforms.PLATFORM_REGISTRY[p]["default"] for p in ("jd", "zkh", "ehsy", "1688"))
 
 
 def test_alias_to_id_maps_all_aliases():

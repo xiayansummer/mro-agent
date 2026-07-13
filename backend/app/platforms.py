@@ -14,9 +14,9 @@ PLATFORM_REGISTRY: dict[str, dict] = {
     "jd":   {"cn": "京东工业品", "aliases": ["京东工业品", "京东", "jd"],            "collector": "extension", "default": True},
     "zkh":  {"cn": "震坤行",     "aliases": ["震坤行", "zkh"],                       "collector": "extension", "default": True},
     "ehsy": {"cn": "西域",       "aliases": ["西域", "ehsy"],                        "collector": "server",    "default": True},
-    # 1688:后端已认识(Literal/别名/中文名/collector 全覆盖),但暂不进默认——待 Chrome
-    # 扩展 1688 采集端到端校准并铺开后,把此处 default 翻 True 即成第 4 个默认比价平台。
-    "1688": {"cn": "阿里巴巴1688", "aliases": ["1688", "阿里巴巴", "阿里", "alibaba"], "collector": "extension", "default": False},
+    # 1688:2026-07-13 扩展 1688 采集端到端校准通过(真机跑通 搜索→GBK→解析→回传→排序),
+    # 翻 default=True 正式进默认——比价默认四平台(jd/zkh/ehsy/1688)。
+    "1688": {"cn": "阿里巴巴1688", "aliases": ["1688", "阿里巴巴", "阿里", "alibaba"], "collector": "extension", "default": True},
 }
 
 # 全量已注册平台:build_search_terms 为所有平台预生成检索词(都复用同一批降级词),
