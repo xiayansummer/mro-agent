@@ -38,4 +38,12 @@ describe("normalizeComparisonTask", () => {
     expect(t.subtasks).toEqual([]);
     expect(t.id).toBe("");
   });
+
+  it("含 1688 subtask 的 task 正常规整", () => {
+    const t = normalizeComparisonTask({
+      subtasks: [{ id: "s", platform: "1688", status: "done", items: [{ id: "o", platform: "1688" }] }],
+    });
+    expect(t.subtasks[0].platform).toBe("1688");
+    expect(t.subtasks[0].items).toHaveLength(1);
+  });
 });
