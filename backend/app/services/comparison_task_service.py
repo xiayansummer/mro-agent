@@ -19,6 +19,7 @@ from app.services.memory_service import memory_service
 from app.services.user_service import _external_id_to_db_id, db_id_to_external_id  # noqa: F401
 # 共享 helper(含时区安全的 _millis);re-export 保持 `from ...comparison_task_service
 # import _millis`(test_audit_fixes 等)仍可用。
+from app import platforms
 from app.services.comparison_common import (  # noqa: F401
     _require_db_user_id,
     _new_id,
@@ -82,10 +83,11 @@ async def start_draft(draft_id: str, user_id: str) -> Optional[dict]:
             return await get_task(existing_row[0], user_id)
 
         task_id = _new_id("cmp_task")
-        selected_platforms = _loads(draft[1]) or ["jd", "zkh", "ehsy"]
+        selected_platforms = _loads(draft[1]) or list(platforms.DEFAULT_PLATFORMS)
         search_terms = _loads(draft[2]) or {}
         extension_status = await extension_service.get_extension_status(user_id)
-        extension_platforms = [p for p in selected_platforms if p != "ehsy"]
+        _ext_ids = platforms.extension_platform_ids()
+        extension_platforms = [p for p in selected_platforms if p in _ext_ids]
         subtask_specs = _build_subtask_specs(extension_platforms, search_terms, extension_status)
         task_status = _task_status_for_subtasks(subtask_specs)
         draft_status = (
@@ -146,24 +148,18 @@ async def start_draft(draft_id: str, user_id: str) -> Optional[dict]:
         await session.commit()
 
     if "ehsy" in selected_platforms:
-        await _inject_ehsy_subtask(task_id, user_id, _loads(draft[3]) or {}, search_terms)
+        _terms = search_terms if isinstance(search_terms, dict) else {}
+        ehsy_terms = _terms.get("ehsy") or next((v for v in _terms.values() if v), [])
+        await _inject_ehsy_subtask(task_id, user_id, _loads(draft[3]) or {}, ehsy_terms)
 
     return await get_task(task_id, user_id)
 
 
-def _ehsy_search_term(search_terms: dict, structure: dict) -> str:
-    for key in ("jd", "zkh"):
-        terms = search_terms.get(key) or []
-        if terms:
-            return terms[0]
-    return ((structure or {}).get("specification") or {}).get("productType") or ""
-
-
-async def _inject_ehsy_subtask(task_id: str, user_id: str, structure: dict, search_terms: dict) -> None:
+async def _inject_ehsy_subtask(task_id: str, user_id: str, structure: dict, terms: list) -> None:
     """后端服务端抓西域,排序后以 DONE 子任务落库。独立 session + try/except:
     西域故障绝不影响已提交的 jd/zkh 子任务。"""
     try:
-        term = _ehsy_search_term(search_terms, structure)
+        term = terms[0] if terms else ((structure or {}).get("specification") or {}).get("productType") or ""
         if not term:
             return
         raw = await ehsy_comparison_source.fetch_ehsy_offers(term)
