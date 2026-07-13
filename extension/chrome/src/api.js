@@ -40,8 +40,24 @@ export async function reportStatus(apiBase, extToken, payload) {
 async function safeDetail(response) {
   try {
     const body = await response.json();
-    return body.detail || body.message || "";
+    return detailToString(body.detail ?? body.message);
   } catch {
     return "";
   }
+}
+
+// FastAPI 校验错误(422)的 detail 是对象数组 [{loc,msg,type},...],直接 String() 会得到
+// "[object Object]" 掩盖真实原因。这里统一归一为可读字符串:字符串原样返回、数组取各项 msg
+// 拼接、对象取 msg,兜底 JSON 序列化。任何 4xx/5xx 都能显示出人能看懂的错误。
+export function detailToString(detail) {
+  if (detail == null) return "";
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    return detail
+      .map((e) => (e && typeof e === "object" ? e.msg || JSON.stringify(e) : String(e)))
+      .filter(Boolean)
+      .join("；");
+  }
+  if (typeof detail === "object") return detail.msg || JSON.stringify(detail);
+  return String(detail);
 }
