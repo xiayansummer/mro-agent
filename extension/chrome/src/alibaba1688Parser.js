@@ -123,9 +123,17 @@ export function collect1688RawCards(limit = 10) {
   };
 }
 
+// 从商品 href 里取 1688 offerId(如 detail.1688.com/offer/626xxxxx.html 里的数字)作稳定 id;
+// 取不到用 rank 兜底。dedup 已按 href 去重,这里只需稳定可辨识。
+export function offer1688Id(href, rank) {
+  const m = (href || "").match(/(\d{6,})/);
+  return m ? `1688-${m[1]}` : `1688-${rank}`;
+}
+
 /**
  * 后台解析:吃 collect1688RawCards 的原始数据 → {url, offers, hasLoginWall, hasPriceSignal}。
- * offer = {title, priceValue, priceText, moq, imageUrl, productUrl, brand}。纯数据入参、无 DOM,可单测。
+ * offer 为完整 ExternalOffer 形状(id/platform/unitComparable/rawRank/matchScore/minOrderQty…),
+ * 与后端严校验一致。纯数据入参、无 DOM,可单测。
  */
 export function parse1688SearchPage(raw, limit = 10) {
   const cards = (raw && raw.cards) || [];
@@ -140,14 +148,26 @@ export function parse1688SearchPage(raw, limit = 10) {
     if (seen.has(key)) continue;
     seen.add(key);
     const { priceValue, priceText } = parsePrice(extractPriceText(leaves));
+    const moq = parseMoq(leaves.join(" "));
+    const rank = offers.length + 1;
+    // 必须产出完整 ExternalOffer 形状(后端 SubmitSubtaskResultsRequest 按 ExternalOffer 严校验,
+    // 缺 id/platform/unitComparable/rawRank/matchScore 会 422 → 回传失败、子任务卡 in_progress)。
+    // 起批价不可做单位价比较 → unitComparable=false;起订量放专用字段 minOrderQty。
     offers.push({
+      id: offer1688Id(card.href, rank),
+      platform: "1688",
       title,
-      priceValue,
-      priceText,
-      moq: parseMoq(leaves.join(" ")),
-      imageUrl: card.imageUrl || "",
-      productUrl: card.href || "",
       brand: null,
+      priceText,
+      priceValue,
+      currency: "CNY",
+      unitComparable: false,
+      minOrderQty: moq || null,
+      productUrl: card.href || "",
+      imageUrl: card.imageUrl || "",
+      rawRank: rank,
+      matchScore: 0,
+      matchReasons: [],
     });
   }
   return {

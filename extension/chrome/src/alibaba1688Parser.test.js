@@ -90,22 +90,33 @@ test("classify1688Page 登录墙/空/正常", () => {
   assert.equal(classify1688Page({ isSearchUrl: true, validOfferCount: 0, hasLoginWall: false }), "empty");
 });
 
-test("parse1688SearchPage 吃 collect 原始数据产出 offer(全链路,无 DOM)", () => {
+test("parse1688SearchPage 吃 collect 原始数据产出完整 ExternalOffer(全链路,无 DOM)", () => {
   const raw = {
     url: "https://s.1688.com/selloffer/offer_search.htm?keywords=x",
     hasLoginWall: false,
     cards: [
-      { leaves: REAL_CARD_LEAVES, href: "https://detail.1688.com/offer/111.html", imageUrl: "https://x.alicdn.com/a.jpg" },
-      { leaves: ["六角", "螺栓", "¥", "2", ".3", "退货包运费"], href: "https://detail.1688.com/offer/222.html", imageUrl: "" },
+      { leaves: [...REAL_CARD_LEAVES, "100件起批"], href: "https://detail.1688.com/offer/626012345.html", imageUrl: "https://x.alicdn.com/a.jpg" },
+      { leaves: ["六角", "螺栓", "¥", "2", ".3", "退货包运费"], href: "https://detail.1688.com/offer/700099888.html", imageUrl: "" },
     ],
   };
   const page = parse1688SearchPage(raw, 10);
   assert.equal(page.offers.length, 2);
-  assert.ok(page.offers[0].title.startsWith("304不锈钢内六角螺丝"));
-  assert.equal(page.offers[0].priceValue, 0.05);
-  assert.equal(page.offers[0].productUrl, "https://detail.1688.com/offer/111.html");
+  const o = page.offers[0];
+  // 后端 ExternalOffer 严校验必填字段——缺任一就 422、回传失败
+  assert.equal(o.id, "1688-626012345");
+  assert.equal(o.platform, "1688");
+  assert.ok(o.title.startsWith("304不锈钢内六角螺丝"));
+  assert.equal(o.unitComparable, false); // 起批价不可做单位价比较
+  assert.equal(o.productUrl, "https://detail.1688.com/offer/626012345.html");
+  assert.equal(o.rawRank, 1);
+  assert.equal(o.matchScore, 0);
+  assert.equal(o.currency, "CNY");
+  assert.deepEqual(o.matchReasons, []);
+  assert.equal(o.priceValue, 0.05);
+  assert.equal(o.minOrderQty, "≥100件"); // 起订量落专用字段
   assert.equal(page.offers[1].title, "六角螺栓");
   assert.equal(page.offers[1].priceValue, 2.3);
+  assert.equal(page.offers[1].minOrderQty, null); // 无起订量→null
   assert.equal(page.hasPriceSignal, true);
   assert.equal(page.hasLoginWall, false);
 });
