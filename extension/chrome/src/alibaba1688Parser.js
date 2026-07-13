@@ -34,14 +34,65 @@ export function parseMoq(text) {
   return m ? `≥${m[1]}${m[2]}` : "";
 }
 
-function longestChineseText(card) {
-  let best = "";
-  for (const el of card.querySelectorAll("*")) {
-    if (el.children.length) continue;
-    const t = (el.textContent || "").trim();
-    if (/[一-龥]/.test(t) && t.length > best.length && !/^广告$|^立即查看$|^\d/.test(t)) best = t;
+// 卡片内所有叶子文本节点,按文档顺序。1688 把标题/属性/价格碎片/销量拆成很多相邻节点,
+// 逐节点处理比对整卡 textContent 做正则更稳(整卡拼接会把价格和后面的销量数字粘连)。
+export function leafTexts(card) {
+  return [...card.querySelectorAll("*")]
+    .filter((el) => !el.children.length)
+    .map((el) => (el.textContent || "").trim())
+    .filter(Boolean);
+}
+
+// 噪声叶子:促销/物流标签、公司名、成交计数、百分比、分隔符。实测这些混在标题区之外,
+// 用于把它们从标题里剔除。注意不按"以数字开头"排除——商品名常以数字/型号打头(如"304不锈钢…")。
+export function isNoiseLeaf(t) {
+  return (
+    !t ||
+    t === "｜" ||
+    t === "|" ||
+    /^(好评率|回头率|全网|月浏览|浏览|退货|包邮|包运费|先采后付|先采|代发|定制|广告|立即|已售|复购|明天达|支持|下单|旺旺|在线|口碑|品牌|图片|视频)/.test(t) ||
+    /(有限公司|制造厂|经营部|商行|工厂|旗舰店|专营店|专卖店|五金厂)$/.test(t) ||
+    /^\d[\d.]*(万|亿|\+)*\s*件$/.test(t) || // 成交计数 "1500+件"/"10万+件"
+    /^\d+(\.\d+)?%$/.test(t) // 百分比
+  );
+}
+
+// 标题 = 价格节点(¥)之前的非噪声叶子拼接。实测 1688 列表页把标题排在价格前、成交计数/物流
+// 标签排在价格后,故以价格节点为结构边界能天然排除"1500+件/月浏览1000+"等尾部计数,
+// 无需逐类特判。标题可能被拆成多个纯中文碎片(如"六角"+"螺栓"),相邻纯中文段无缝拼接;
+// 规格段(如"10B21(碳钢)""8.8级")用空格分隔以保留可读性并区分同名商品。
+export function extractTitle(leaves) {
+  let priceIdx = leaves.findIndex((t) => /[¥￥]/.test(t));
+  if (priceIdx < 0) priceIdx = leaves.length;
+  const parts = [];
+  for (let i = 0; i < priceIdx; i += 1) {
+    const t = leaves[i];
+    if (isNoiseLeaf(t)) continue;
+    if (!/[一-龥A-Za-z0-9]/.test(t)) continue; // 跳过纯符号
+    parts.push(t);
   }
-  return best.slice(0, 100);
+  if (!parts.length) return "";
+  let title = parts[0];
+  for (let k = 1; k < parts.length; k += 1) {
+    const prevPureCn = /^[一-龥]+$/.test(parts[k - 1]);
+    const curPureCn = /^[一-龥]+$/.test(parts[k]);
+    title += prevPureCn && curPureCn ? parts[k] : ` ${parts[k]}`;
+  }
+  return title.slice(0, 100);
+}
+
+// 价格 = 1688 把价格拆成 "¥" / 整数 / 小数 多个相邻文本节点(实测 ¥|0|.05)。
+// 从 ¥ 节点起,拼接紧邻的纯数字/小数片段;遇非数字节点(如"全网10万+件")即停,避免粘连销量。
+// 返回可交给 parsePrice 的价格字符串(如 "¥0.05"),取不到返回 ""。
+export function extractPriceText(leaves) {
+  const i = leaves.findIndex((t) => /[¥￥]/.test(t));
+  if (i < 0) return "";
+  let s = leaves[i];
+  for (let j = i + 1; j < leaves.length; j += 1) {
+    if (/^[.\d]+$/.test(leaves[j])) s += leaves[j];
+    else break;
+  }
+  return s;
 }
 
 function cardImageUrl(card) {
@@ -60,19 +111,18 @@ export function parse1688SearchPage(limit = 10) {
   );
   for (const card of cards) {
     if (offers.length >= limit) break;
-    // 广告卡片:含"广告"且取不到价格的跳过(有价格的推广位仍作为一条候选)
-    if (/广告/.test(card.textContent || "") && parsePrice(card.textContent || "").priceValue == null) continue;
-    const title = longestChineseText(card);
+    const leaves = leafTexts(card);
+    const title = extractTitle(leaves);
     if (!title) continue;
     const key = card.href || title;
     if (seen.has(key)) continue;
     seen.add(key);
-    const { priceValue, priceText } = parsePrice(card.textContent || "");
+    const { priceValue, priceText } = parsePrice(extractPriceText(leaves));
     offers.push({
       title,
       priceValue,
       priceText,
-      moq: parseMoq(card.textContent || ""),
+      moq: parseMoq(leaves.join(" ")),
       imageUrl: cardImageUrl(card),
       productUrl: card.href,
       brand: null,
