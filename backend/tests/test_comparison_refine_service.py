@@ -197,3 +197,27 @@ def test_label_ehsy_keep_and_drop():
             "priceMin": None, "priceMax": None, "sort": None, "limit": None}
     assert build_label({**base, "platformKeep": "ehsy"}) == "西域"
     assert build_label({**base, "platformDrop": "ehsy"}) == "去掉西域"
+
+
+# —— Task 4: 1688 平台过滤 ——
+def test_refine_keep_1688():
+    assert parse_refinement("只看1688")["platformKeep"] == "1688"
+    assert parse_refinement("只要阿里巴巴的")["platformKeep"] == "1688"
+
+
+def test_refine_drop_1688():
+    assert parse_refinement("去掉1688")["platformDrop"] == "1688"
+    assert parse_refinement("不要阿里巴巴")["platformDrop"] == "1688"
+
+
+def test_refine_existing_platforms_still_work():
+    assert parse_refinement("只看京东工业品")["platformKeep"] == "jd"
+    assert parse_refinement("去掉西域")["platformDrop"] == "ehsy"
+    assert parse_refinement("只看震坤行")["platformKeep"] == "zkh"
+
+
+def test_build_label_1688():
+    base = {"platformKeep": None, "platformDrop": None, "brandKeep": None, "brandDrop": None,
+            "priceMin": None, "priceMax": None, "sort": None, "limit": None}
+    label = build_label({**base, "platformKeep": "1688"})
+    assert "阿里巴巴1688" in label

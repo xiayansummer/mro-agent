@@ -9,15 +9,20 @@ from typing import Optional
 
 # 直接从真源 normalization 导入,不再经 comparison_ranker 借道(避免 refine→ranker 假耦合)
 from app.services.normalization import text_matches_brand
+from app import platforms
 
 _CN_NUM = {"一": 1, "两": 2, "二": 2, "三": 3, "四": 4, "五": 5,
            "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
 
 _ASC = ("最便宜", "价格最低", "最低价", "价格从低到高", "便宜的", "低价", "价低")
 _DESC = ("最贵", "价格最高", "最高价", "价格从高到低", "贵的", "高价")
-_PLATFORM = (("京东工业品", "jd"), ("京东", "jd"), ("jd", "jd"),
-             ("震坤行", "zkh"), ("zkh", "zkh"),
-             ("西域", "ehsy"), ("ehsy", "ehsy"))
+
+# 平台表从 registry 派生:别名按长度降序,长别名先命中(避免"京东工业品"被"京东"截断)
+_ALIAS_TO_ID = platforms.alias_to_id()
+_PLAT_CN = platforms.id_to_cn()
+_PLATFORM = tuple((alias, _ALIAS_TO_ID[alias]) for alias in platforms.aliases_by_length_desc())
+_PLAT_ALIAS_PATTERN = platforms.platform_alias_pattern()
+_PLAT_EXCLUDE = platforms.cn_names() | set(_ALIAS_TO_ID)  # 品牌解析排除集(避免"只看1688"被当品牌)
 
 # 去掉操作符后,残留里属于"命令/连接/数量"的词不算新商品名词
 _STOP = ("能不能", "可不可以", "可以", "帮我", "帮", "请", "选出", "挑出", "挑", "给我",
@@ -45,8 +50,6 @@ def _to_float(tok: str) -> Optional[float]:
         return float(n) if n is not None else None
 
 
-_PLAT_CN = {"jd": "京东工业品", "zkh": "震坤行", "ehsy": "西域"}
-_PLAT_NEG_MAP = {"京东工业品": "jd", "京东": "jd", "震坤行": "zkh", "西域": "ehsy", "ehsy": "ehsy"}
 
 
 def _brand_text(offer: dict) -> str:
@@ -119,9 +122,9 @@ def parse_refinement(message: str) -> Optional[dict]:
         work = work.replace(span, " ", 1)
 
     # 平台:先判否定(去掉/排除/不要 X)→ platformDrop;否则 只看 X → platformKeep。
-    _neg_plat = re.search(r"(去掉|不要|排除|除了)\s*(京东工业品|京东|震坤行|西域|ehsy)", work)
+    _neg_plat = re.search(r"(去掉|不要|排除|除了)\s*(" + _PLAT_ALIAS_PATTERN + r")", work)
     if _neg_plat:
-        cmd["platformDrop"] = _PLAT_NEG_MAP[_neg_plat.group(2)]
+        cmd["platformDrop"] = _ALIAS_TO_ID[_neg_plat.group(2)]
         consume(_neg_plat.group(0)); matched = True
     else:
         for kw, plat in _PLATFORM:
@@ -174,7 +177,7 @@ def parse_refinement(message: str) -> Optional[dict]:
     # 品牌 token 必须收紧:不允许跨过 的/品牌/标点/空白/行末,避免把商品名词吞入品牌
     if cmd["brandKeep"] is None:
         m = re.search(r"(只看|只要|要)\s*([^\s,，。的品]+?)(?:品牌|的|[,，。]|$)", work)
-        if m and m.group(2) not in {"", "京东", "震坤行", "西域"}:
+        if m and m.group(2) and m.group(2) not in _PLAT_EXCLUDE:
             cmd["brandKeep"] = m.group(2); consume(m.group(0)); matched = True
     m = re.search(r"(去掉|排除|不要|除了)\s*([^\s,，。的品]+?)(?:品牌|的|[,，。]|$)", work)
     if m and m.group(2):

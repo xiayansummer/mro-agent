@@ -12,6 +12,7 @@ import {
 } from "./taskApi.js";
 import { runJdSearchTask } from "./jdSearch.js";
 import { runZkhSearchTask } from "./zkhSearch.js";
+import { run1688SearchTask } from "./alibaba1688Search.js";
 import { decideSubtaskOutcome } from "./taskOutcome.js";
 
 let taskRunning = false;
@@ -137,5 +138,6 @@ async function pollAndRunNextTask() {
 function getTaskRunner(platform) {
   if (platform === "jd") return runJdSearchTask;
   if (platform === "zkh") return runZkhSearchTask;
+  if (platform === "1688") return run1688SearchTask;
   return null;
 }

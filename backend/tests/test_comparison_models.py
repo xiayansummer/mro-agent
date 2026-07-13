@@ -3,8 +3,10 @@ from pydantic import ValidationError
 
 from app.models.comparison import (
     ComparisonDraftStatus,
+    ComparisonSearchTerms,
     ComparisonStructure,
     ExternalOffer,
+    PurchaseConstraints,
 )
 
 
@@ -13,9 +15,10 @@ def test_comparison_structure_defaults():
 
     assert structure.category.confidence == 0.0
     assert structure.specification.attributes == []
-    assert structure.purchaseConstraints.preferredPlatforms == ["jd", "zkh", "ehsy"]
-    assert structure.searchTerms.jd == []
-    assert structure.searchTerms.zkh == []
+    # 默认四平台(1688 已 default=True,详见 test_platforms)
+    assert structure.purchaseConstraints.preferredPlatforms == ["jd", "zkh", "ehsy", "1688"]
+    assert structure.searchTerms.get("jd") == []
+    assert structure.searchTerms.get("zkh") == []
 
 
 def test_external_offer_required_fields_and_defaults():
@@ -63,4 +66,23 @@ def test_platform_accepts_ehsy():
 
 def test_structure_default_platforms_include_ehsy():
     s = ComparisonStructure()
-    assert s.purchaseConstraints.preferredPlatforms == ["jd", "zkh", "ehsy"]
+    assert s.purchaseConstraints.preferredPlatforms == ["jd", "zkh", "ehsy", "1688"]
+
+
+def test_search_terms_is_dict_and_dumps_flat():
+    st = ComparisonSearchTerms({"jd": ["a"], "zkh": ["b"], "1688": ["c"], "ehsy": ["d"]})
+    assert st.get("1688") == ["c"]
+    assert st.get("缺失") == []
+    assert st.model_dump(mode="json") == {"jd": ["a"], "zkh": ["b"], "1688": ["c"], "ehsy": ["d"]}
+
+
+def test_search_terms_reads_legacy_jd_zkh_only():
+    # 存量 DB 里只有 jd/zkh,反序列化应正常、缺失平台取空
+    st = ComparisonSearchTerms.model_validate({"jd": ["x"], "zkh": ["y"]})
+    assert st.get("jd") == ["x"] and st.get("1688") == []
+
+
+def test_preferred_platforms_default_includes_1688():
+    # 1688 端到端校准通过后已进默认四平台。
+    default = PurchaseConstraints().preferredPlatforms
+    assert default == ["jd", "zkh", "ehsy", "1688"]

@@ -10,6 +10,7 @@ from app.models.comparison import (
     ComparisonStructure,
     Platform,
 )
+from app.platforms import DEFAULT_PLATFORMS
 from app.services.comparison_query_builder import build_search_terms
 from app.services.comparison_structure import build_comparison_structure
 from app.services.user_service import _external_id_to_db_id  # noqa: F401 — kept for back-compat re-export
@@ -68,7 +69,7 @@ async def create_draft(
     db_user_id = _require_db_user_id(user_id)
     draft_id = _new_id("cmp_draft")
     structure.searchTerms = build_search_terms(structure)
-    selected_platforms = structure.purchaseConstraints.preferredPlatforms or ["jd", "zkh", "ehsy"]
+    selected_platforms = structure.purchaseConstraints.preferredPlatforms or list(DEFAULT_PLATFORMS)
 
     async with AsyncSessionLocal() as session:
         await session.execute(
@@ -128,7 +129,7 @@ async def update_draft_structure(
 ) -> Optional[dict]:
     db_user_id = _require_db_user_id(user_id)
     structure.searchTerms = build_search_terms(structure)
-    platforms = selected_platforms or structure.purchaseConstraints.preferredPlatforms or ["jd", "zkh", "ehsy"]
+    platforms = selected_platforms or structure.purchaseConstraints.preferredPlatforms or list(DEFAULT_PLATFORMS)
 
     async with AsyncSessionLocal() as session:
         result = await session.execute(

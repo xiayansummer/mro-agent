@@ -221,7 +221,7 @@ async def test_slot_answer_message_auto_skips_even_without_flag(monkeypatch):
                         lambda p, s: slot_calls.append(1) or {"summary": "x", "known": [], "missing": [{"key": "quantity", "question": "数量?", "options": []}]})
 
     # 模拟 slot 卡片提交回来的消息(带卡片概述文本),未显式传 skip_clarification=True
-    msg = "需要采购手拉葫芦，请先确认关键参数后再查询京东工业品和震坤行。 商品类型手拉葫芦 按平台起订量"
+    msg = "需要采购手拉葫芦，请先确认关键参数后再查询各比价平台。 商品类型手拉葫芦 按平台起订量"
     r = await cs.build_comparison_structure(msg)
     assert r.slotClarification is None  # 自动跳过,不再追问
     assert len(slot_calls) == 0

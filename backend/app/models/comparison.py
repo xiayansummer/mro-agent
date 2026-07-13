@@ -1,10 +1,12 @@
 from enum import StrEnum
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, RootModel
+
+from app.platforms import DEFAULT_PLATFORMS
 
 
-Platform = Literal["jd", "zkh", "ehsy"]
+Platform = Literal["jd", "zkh", "ehsy", "1688"]
 
 
 class ComparisonDraftStatus(StrEnum):
@@ -72,13 +74,23 @@ class PurchaseConstraints(BaseModel):
     unit: Optional[str] = None
     budgetMax: Optional[float] = None
     deliveryRequiredBy: Optional[str] = None
-    preferredPlatforms: list[Platform] = Field(default_factory=lambda: ["jd", "zkh", "ehsy"])
+    preferredPlatforms: list[Platform] = Field(default_factory=lambda: list(DEFAULT_PLATFORMS))
     requireInStock: Optional[bool] = None
 
 
-class ComparisonSearchTerms(BaseModel):
-    jd: list[str] = Field(default_factory=list)
-    zkh: list[str] = Field(default_factory=list)
+class ComparisonSearchTerms(RootModel[dict[str, list[str]]]):
+    root: dict[str, list[str]] = {}
+
+    def get(self, platform: str) -> list[str]:
+        return self.root.get(platform, [])
+
+    def __getattr__(self, name: str) -> list[str]:
+        # Support backward compatibility for .jd, .zkh, etc. attribute access
+        # Use __dict__.get to avoid infinite recursion if 'root' is not yet set
+        root = self.__dict__.get("root")
+        if root is not None and name in root:
+            return root[name]
+        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
 
 
 class ComparisonStructure(BaseModel):

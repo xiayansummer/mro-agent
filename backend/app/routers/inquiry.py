@@ -1,7 +1,7 @@
 """
 批量询价路由
 POST /api/inquiry/upload      — 上传 Excel/CSV，解析为结构化行(不做库内匹配)
-POST /api/inquiry/compare-row — 对一行需求触发三平台外部比价(京东/震坤行/西域)
+POST /api/inquiry/compare-row — 对一行需求触发外部比价(各平台)
 GET  /api/inquiry/template    — 下载询价模板
 """
 import asyncio
@@ -130,7 +130,7 @@ async def compare_inquiry_row(
     row: dict = Body(...),
     user_id: str = Depends(require_user_id),
 ):
-    """对询价表的一行需求,按需触发一次三平台外部比价(京东/震坤行/西域)。
+    """对询价表的一行需求,按需触发一次外部比价(各平台)。
 
     复用现有比价流程:拼 query → build_comparison_structure(空上下文+不追问)
     → create_draft(inquiry- 前缀 session,不写 t_chat_message、不污染对话历史)

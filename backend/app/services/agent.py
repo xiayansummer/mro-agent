@@ -56,7 +56,7 @@ def _slot_followup_text(conversation: list[dict]) -> str:
             "几轮下来还没锁定合适的产品，可能受了前面对话信息的干扰。"
             "建议点下方「🔄 重新描述需求」开个新会话，把品类、规格、品牌、数量一次说清，这样检索最准。"
         )
-    return "请先通过上方卡片确认关键参数，确认后我再查询京东工业品和震坤行。"
+    return "请先通过上方卡片确认关键参数，确认后我再开始查询各比价平台。"
 
 
 # In-memory session store for hot multi-turn conversations.
@@ -197,7 +197,7 @@ async def handle_message(
         or draft.get("structure", {}).get("category", {}).get("l3")
         or "该产品"
     )
-    text = f"已整理「{product_type}」的比价结构，请确认后开始查询京东工业品和震坤行。"
+    text = f"已整理「{product_type}」的比价结构，请确认后开始查询各比价平台。"
     yield f"event: text\ndata: {json.dumps(text, ensure_ascii=False)}\n\n"
 
     ctx["conversation"].append({"role": "user", "content": user_message})

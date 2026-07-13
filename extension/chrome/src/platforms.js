@@ -63,6 +63,28 @@ export const PLATFORMS = [
       "您还未登录",
     ],
   },
+  {
+    id: "1688",
+    label: "阿里巴巴1688",
+    probeUrl: "https://www.1688.com/",
+    loginUrl: "https://login.1688.com/member/signin.htm",
+    // ⚠️ 登录态特征为初值,需用真实 1688 登录/未登录页校准(见 scripts/1688-calibrate.console.js)。
+    // 2026-07-13 实测:未登录时搜索页也能看到起批价,但完整信息可能需登录。
+    loggedInSelectors: [
+      ".member-name",
+      ".login-info-name",
+      "[class*='member'] [class*='name']",
+      "a[href*='work.1688.com']",
+      "a[href*='member.1688.com']",
+    ],
+    loggedInText: ["退出", "我的阿里", "采购车", "买家中心", "卖家中心"],
+    // 收紧:不用裸"登录"(已登录页的"退出登录"也含该词,会误判)。
+    loggedOutSelectors: [
+      "a[href*='login.1688.com']",
+      "a[href*='signin']",
+    ],
+    loggedOutText: ["亲，请登录", "请登录", "免费注册"],
+  },
 ];
 
 export function getPlatform(platformId) {

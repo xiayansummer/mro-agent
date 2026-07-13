@@ -1,12 +1,15 @@
 from app.models.comparison import ComparisonSearchTerms, ComparisonStructure
+from app.platforms import ALL_PLATFORMS
 
 MAX_TERMS_PER_PLATFORM = 4
 MAX_SPEC_TOKENS = 4
 
 
 def build_search_terms(structure: ComparisonStructure) -> ComparisonSearchTerms:
-    terms = _build_ordered_terms(structure)
-    return ComparisonSearchTerms(jd=terms[:MAX_TERMS_PER_PLATFORM], zkh=terms[:MAX_TERMS_PER_PLATFORM])
+    # 为全量已注册平台预生成检索词(都复用同一批降级词),使显式勾选的非默认平台
+    # (灰度期的 1688)也有词可用;未被选中的平台其词只是存着不参与比价。
+    terms = _build_ordered_terms(structure)[:MAX_TERMS_PER_PLATFORM]
+    return ComparisonSearchTerms({platform: list(terms) for platform in ALL_PLATFORMS})
 
 
 def _build_ordered_terms(structure: ComparisonStructure) -> list[str]:

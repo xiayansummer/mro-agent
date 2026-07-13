@@ -638,11 +638,33 @@ async def test_get_latest_session_offers_none_when_all_tasks_empty(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_ehsy_search_term_prefers_jd_then_zkh_then_producttype():
-    from app.services.comparison_task_service import _ehsy_search_term
-    assert _ehsy_search_term({"jd": ["a", "b"], "zkh": ["c"]}, {}) == "a"
-    assert _ehsy_search_term({"jd": [], "zkh": ["c"]}, {}) == "c"
-    assert _ehsy_search_term({}, {"specification": {"productType": "口罩"}}) == "口罩"
+async def test_inject_ehsy_uses_first_term_and_falls_back_to_producttype(monkeypatch):
+    """_inject_ehsy_subtask 用 terms[0];terms 空时回退 productType。"""
+    from app.services import comparison_task_service as svc
+
+    captured_terms: list[str] = []
+
+    async def fake_fetch(term, limit=8):
+        captured_terms.append(term)
+        return []
+    monkeypatch.setattr(svc.ehsy_comparison_source, "fetch_ehsy_offers", fake_fetch)
+
+    class S:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def execute(self, statement, params): return FakeResult()
+        async def commit(self): pass
+    monkeypatch.setattr(svc, "AsyncSessionLocal", S)
+    async def fake_refresh(session, sid): return None
+    monkeypatch.setattr(svc, "_refresh_task_status", fake_refresh)
+
+    # terms 非空:直接用 terms[0]
+    await svc._inject_ehsy_subtask("t1", "u7", {}, ["口罩", "防尘口罩"])
+    assert captured_terms[-1] == "口罩"
+
+    # terms 空:回退到 productType
+    await svc._inject_ehsy_subtask("t1", "u7", {"specification": {"productType": "外六角螺栓"}}, [])
+    assert captured_terms[-1] == "外六角螺栓"
 
 
 @pytest.mark.asyncio
@@ -670,7 +692,7 @@ async def test_inject_ehsy_inserts_done_subtask(monkeypatch):
     async def fake_refresh(session, sid): return None
     monkeypatch.setattr(svc, "_refresh_task_status", fake_refresh)
 
-    await svc._inject_ehsy_subtask("task-1", "u7", {"specification": {"productType": "口罩"}}, {"jd": ["口罩"]})
+    await svc._inject_ehsy_subtask("task-1", "u7", {"specification": {"productType": "口罩"}}, ["口罩"])
 
     assert captured.get("platform") == "ehsy"
     assert captured.get("status") == svc.ComparisonSubtaskStatus.DONE.value
@@ -696,7 +718,7 @@ async def test_inject_ehsy_swallows_failure(monkeypatch):
     monkeypatch.setattr(svc.ehsy_comparison_source, "fetch_ehsy_offers", boom)
 
     # 不抛异常,且没有 INSERT
-    await svc._inject_ehsy_subtask("task-1", "u7", {}, {"jd": ["口罩"]})
+    await svc._inject_ehsy_subtask("task-1", "u7", {}, ["口罩"])
     assert inserted["n"] == 0
 
 
@@ -727,8 +749,8 @@ async def test_start_draft_calls_inject_ehsy_when_ehsy_in_platforms(monkeypatch)
 
     injected_calls: list[dict] = []
 
-    async def spy_inject(task_id, user_id, structure, search_terms):
-        injected_calls.append({"task_id": task_id, "user_id": user_id, "search_terms": search_terms})
+    async def spy_inject(task_id, user_id, structure, terms):
+        injected_calls.append({"task_id": task_id, "user_id": user_id, "terms": terms})
 
     monkeypatch.setattr(comparison_task_service, "_inject_ehsy_subtask", spy_inject)
 
@@ -737,7 +759,30 @@ async def test_start_draft_calls_inject_ehsy_when_ehsy_in_platforms(monkeypatch)
     assert task is not None, "start_draft 应返回 task dict"
     assert len(injected_calls) == 1, f"_inject_ehsy_subtask 应被调用一次，实际 {len(injected_calls)} 次"
     assert injected_calls[0]["task_id"] == task["id"]
-    assert injected_calls[0]["search_terms"] == {"jd": ["螺栓 M8"], "zkh": ["螺栓 M8"]}
+    # ehsy 词从 dict 取:无 ehsy key 则回退到任一非空平台首词
+    assert injected_calls[0]["terms"] == ["螺栓 M8"]
+
+
+@pytest.mark.asyncio
+async def test_start_draft_creates_1688_subtask(monkeypatch):
+    FakeSession.drafts[("draft-1688", 7)] = (
+        "draft-1688",
+        json.dumps(["jd", "zkh", "1688"]),
+        json.dumps({"jd": ["t"], "zkh": ["t"], "1688": ["t"]}),
+        _structure_json(),
+    )
+
+    async def fake_status(user_id):
+        return ExtensionStatus(online=True, platforms=[
+            PlatformStatus(platform="jd", loggedIn=True),
+            PlatformStatus(platform="zkh", loggedIn=True),
+            PlatformStatus(platform="1688", loggedIn=True),
+        ])
+    monkeypatch.setattr(comparison_task_service.extension_service, "get_extension_status", fake_status)
+
+    task = await comparison_task_service.start_draft("draft-1688", "u7")
+    platforms_created = {s["platform"] for s in task["subtasks"]}
+    assert "1688" in platforms_created  # 1688 作为扩展子任务被建
 
 
 def _seed_running_subtask():
