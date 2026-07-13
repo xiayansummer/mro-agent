@@ -1,12 +1,13 @@
 from app.models.comparison import ComparisonSearchTerms, ComparisonStructure
+from app.platforms import DEFAULT_PLATFORMS
 
 MAX_TERMS_PER_PLATFORM = 4
 MAX_SPEC_TOKENS = 4
 
 
 def build_search_terms(structure: ComparisonStructure) -> ComparisonSearchTerms:
-    terms = _build_ordered_terms(structure)
-    return ComparisonSearchTerms(jd=terms[:MAX_TERMS_PER_PLATFORM], zkh=terms[:MAX_TERMS_PER_PLATFORM])
+    terms = _build_ordered_terms(structure)[:MAX_TERMS_PER_PLATFORM]
+    return ComparisonSearchTerms({platform: list(terms) for platform in DEFAULT_PLATFORMS})
 
 
 def _build_ordered_terms(structure: ComparisonStructure) -> list[str]:

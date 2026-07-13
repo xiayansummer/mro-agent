@@ -444,3 +444,15 @@ async def test_query_brand_categories_no_brand_match():
 
     assert cats == []
     assert session.execute.call_count == 1  # 品牌都查不到就不再查品类
+
+
+def test_build_search_terms_covers_four_platforms():
+    st = ComparisonStructure(
+        category=ComparisonCategory(l3="外六角螺栓"),
+        specification=ComparisonSpecification(productType="外六角螺栓", brand="晋亿", size="M8"),
+    )
+    terms = build_search_terms(st)
+    dumped = terms.model_dump(mode="json")
+    assert set(dumped) == {"jd", "zkh", "ehsy", "1688"}
+    assert dumped["1688"] == dumped["jd"]  # 四平台复用同一批降级词
+    assert dumped["jd"] and dumped["jd"][0].startswith("晋亿")
