@@ -189,7 +189,8 @@ async def test_update_draft_regenerates_search_terms_and_platforms():
 
 @pytest.mark.asyncio
 async def test_create_draft_empty_preferred_platforms_falls_back_to_jd_zkh_ehsy():
-    """当 preferredPlatforms 为空列表时，create_draft 应兜底为 ["jd", "zkh", "ehsy"]（含西域）。"""
+    """当 preferredPlatforms 为空列表时，create_draft 应兜底为 DEFAULT_PLATFORMS（含1688）。"""
+    from app.platforms import DEFAULT_PLATFORMS
     structure = ComparisonStructure(
         category=ComparisonCategory(l3="轴承"),
         specification=ComparisonSpecification(productType="深沟球轴承", size="6205"),
@@ -204,14 +205,15 @@ async def test_create_draft_empty_preferred_platforms_falls_back_to_jd_zkh_ehsy(
     )
 
     inserted = FakeSession.last_insert
-    assert json.loads(inserted["selected_platforms"]) == ["jd", "zkh", "ehsy"]
-    assert draft["selectedPlatforms"] == ["jd", "zkh", "ehsy"]
+    assert json.loads(inserted["selected_platforms"]) == list(DEFAULT_PLATFORMS)
+    assert draft["selectedPlatforms"] == list(DEFAULT_PLATFORMS)
 
 
 @pytest.mark.asyncio
 async def test_update_draft_empty_preferred_platforms_falls_back_to_jd_zkh_ehsy():
     """当 update_draft_structure 的 selected_platforms=None 且 preferredPlatforms 为空时，
-    应兜底为 ["jd", "zkh", "ehsy"]（含西域）。"""
+    应兜底为 DEFAULT_PLATFORMS（含1688）。"""
+    from app.platforms import DEFAULT_PLATFORMS
     created = await comparison_draft_service.create_draft("u7", "s1", "query", _structure())
 
     updated_structure = ComparisonStructure(
@@ -227,5 +229,5 @@ async def test_update_draft_empty_preferred_platforms_falls_back_to_jd_zkh_ehsy(
         selected_platforms=None,
     )
 
-    assert json.loads(FakeSession.last_update["selected_platforms"]) == ["jd", "zkh", "ehsy"]
-    assert updated["selectedPlatforms"] == ["jd", "zkh", "ehsy"]
+    assert json.loads(FakeSession.last_update["selected_platforms"]) == list(DEFAULT_PLATFORMS)
+    assert updated["selectedPlatforms"] == list(DEFAULT_PLATFORMS)

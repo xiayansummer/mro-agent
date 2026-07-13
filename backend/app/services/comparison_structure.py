@@ -287,7 +287,7 @@ def _comparison_slot_clarification(parsed: dict, structure: ComparisonStructure)
         return None
 
     return {
-        "summary": f"需要采购{product_type}，请先确认关键参数后再查询京东工业品和震坤行。",
+        "summary": f"需要采购{product_type}，请先确认关键参数后再查询各比价平台。",
         "known": known,
         "missing": missing[:3],
     }
