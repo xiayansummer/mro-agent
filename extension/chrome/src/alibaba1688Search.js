@@ -77,13 +77,26 @@ async function collect1688(searchTerm) {
       func: submitSearchInPage,
       args: [searchTerm],
     });
-    await sleep(2600); // 等搜索提交后结果页渲染(1688 结果异步)
-    const [result] = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: parse1688SearchPage,
-      args: [MAX_RESULTS_PER_TERM],
-    });
-    return result?.result || { url: "", offers: [], hasLoginWall: false, hasPriceSignal: false };
+    // 提交后轮询解析:搜索会触发页面导航 + 结果异步渲染,固定 sleep 易抖动(太短→0 结果)。
+    // 改为每 ~900ms 解析一次,拿到 offer 或命中登录墙即返回,最长等到 TERM_TIMEOUT_MS。
+    // 导航过程中 executeScript 可能短暂抛错(帧正在切换),吞掉重试即可。
+    const deadline = Date.now() + TERM_TIMEOUT_MS;
+    let last = { url: "", offers: [], hasLoginWall: false, hasPriceSignal: false };
+    while (Date.now() < deadline) {
+      await sleep(900);
+      try {
+        const [res] = await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: parse1688SearchPage,
+          args: [MAX_RESULTS_PER_TERM],
+        });
+        last = res?.result || last;
+        if ((last.offers && last.offers.length > 0) || last.hasLoginWall) break;
+      } catch (_e) {
+        // 导航中,忽略本次,继续轮询
+      }
+    }
+    return last;
   } finally {
     if (tab.id) {
       await chrome.tabs.remove(tab.id).catch(() => {});
@@ -91,17 +104,32 @@ async function collect1688(searchTerm) {
   }
 }
 
-// 在页面上下文执行:把搜索词填进搜索框并触发搜索(页面按自身 charset 编码提交)。
+// 在页面上下文执行:把搜索词填进搜索框并触发搜索(页面按自身 charset=GBK 编码提交,规避
+// 扩展无法在 JS 里 GBK 编码的问题)。实测(2026-07-13)两个坑:
+// ① 搜索框是受控输入,直接赋 .value 不触发框架状态 → 用原生 setter 再派发 input 事件;
+// ② 1688 的搜索按钮是 <div class="input-button">(非 button/a/input),旧选择器找不到 →
+//    退回 form.submit() 又没带上值 → 0 结果。改为优先点 .input-button / 文字为"搜索"的元素,
+//    仍找不到再回车、最后 form.submit()(表单 accept-charset=GBK 会正确编码)兜底。
 function submitSearchInPage(term) {
   const box = document.querySelector("#alisearch-input, input[name='keywords'], input.ali-search-input");
   if (!box) return;
-  box.value = term;
+  const desc = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value");
+  if (desc && desc.set) desc.set.call(box, term);
+  else box.value = term;
   box.dispatchEvent(new Event("input", { bubbles: true }));
-  const btn = [...document.querySelectorAll("button, a, input[type='submit']")].find(
-    (b) => /搜\s*索|search/i.test(b.textContent || b.value || ""),
-  );
-  if (btn) btn.click();
-  else box.closest("form")?.submit();
+
+  const btn =
+    document.querySelector(".ali-search-box .input-button, .input-button") ||
+    [...document.querySelectorAll("div, span, button, a, input[type='submit']")].find((e) => {
+      const t = (e.textContent || e.value || "").replace(/\s/g, "");
+      return t === "搜索" && e.children.length <= 1;
+    });
+  if (btn) {
+    btn.click();
+    return;
+  }
+  box.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", keyCode: 13, bubbles: true }));
+  box.closest("form")?.submit();
 }
 
 function waitForTabLoad(tabId, timeoutMs) {
