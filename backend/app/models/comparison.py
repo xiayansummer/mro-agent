@@ -86,8 +86,10 @@ class ComparisonSearchTerms(RootModel[dict[str, list[str]]]):
 
     def __getattr__(self, name: str) -> list[str]:
         # Support backward compatibility for .jd, .zkh, etc. attribute access
-        if name in self.root:
-            return self.root[name]
+        # Use __dict__.get to avoid infinite recursion if 'root' is not yet set
+        root = self.__dict__.get("root")
+        if root is not None and name in root:
+            return root[name]
         raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
 
 

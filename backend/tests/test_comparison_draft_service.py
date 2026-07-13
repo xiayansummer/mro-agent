@@ -188,7 +188,7 @@ async def test_update_draft_regenerates_search_terms_and_platforms():
 
 
 @pytest.mark.asyncio
-async def test_create_draft_empty_preferred_platforms_falls_back_to_jd_zkh_ehsy():
+async def test_create_draft_empty_preferred_platforms_falls_back_to_default_platforms():
     """当 preferredPlatforms 为空列表时，create_draft 应兜底为 DEFAULT_PLATFORMS（含1688）。"""
     from app.platforms import DEFAULT_PLATFORMS
     structure = ComparisonStructure(
@@ -210,7 +210,7 @@ async def test_create_draft_empty_preferred_platforms_falls_back_to_jd_zkh_ehsy(
 
 
 @pytest.mark.asyncio
-async def test_update_draft_empty_preferred_platforms_falls_back_to_jd_zkh_ehsy():
+async def test_update_draft_empty_preferred_platforms_falls_back_to_default_platforms():
     """当 update_draft_structure 的 selected_platforms=None 且 preferredPlatforms 为空时，
     应兜底为 DEFAULT_PLATFORMS（含1688）。"""
     from app.platforms import DEFAULT_PLATFORMS

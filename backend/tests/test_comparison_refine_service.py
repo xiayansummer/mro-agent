@@ -213,3 +213,11 @@ def test_refine_drop_1688():
 def test_refine_existing_platforms_still_work():
     assert parse_refinement("只看京东工业品")["platformKeep"] == "jd"
     assert parse_refinement("去掉西域")["platformDrop"] == "ehsy"
+    assert parse_refinement("只看震坤行")["platformKeep"] == "zkh"
+
+
+def test_build_label_1688():
+    base = {"platformKeep": None, "platformDrop": None, "brandKeep": None, "brandDrop": None,
+            "priceMin": None, "priceMax": None, "sort": None, "limit": None}
+    label = build_label({**base, "platformKeep": "1688"})
+    assert "阿里巴巴1688" in label
