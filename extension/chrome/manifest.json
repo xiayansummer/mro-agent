@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "MRO 外部比价助手",
   "description": "绑定 MRO Agent，用你已登录的京东工业品 / 震坤行账号采集搜索结果做工业品比价；不读取或上传 cookie。",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "icons": {
     "16": "icons/icon16.png",
     "32": "icons/icon32.png",
@@ -33,6 +33,7 @@
     "https://mro.fultek.ai/*",
     "https://*.jd.com/*",
     "https://*.jd.hk/*",
-    "https://*.zkh.com/*"
+    "https://*.zkh.com/*",
+    "https://*.1688.com/*"
   ]
 }
