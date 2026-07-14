@@ -1,12 +1,13 @@
 import { registerExtension } from "./api.js";
 import { getSettings } from "./config.js";
+import { PLATFORMS } from "./platforms.js";
 
 const pairingCodeInput = document.querySelector("#pairingCode");
 const pairButton = document.querySelector("#pairButton");
 const heartbeatButton = document.querySelector("#heartbeatButton");
 const resetButton = document.querySelector("#resetButton");
-const openJdLoginButton = document.querySelector("#openJdLoginButton");
-const openZkhLoginButton = document.querySelector("#openZkhLoginButton");
+const headerSubtitle = document.querySelector("#headerSubtitle");
+const platformLoginButtons = document.querySelector("#platformLoginButtons");
 const messageEl = document.querySelector("#message");
 const stateBadge = document.querySelector("#stateBadge");
 const pairingSection = document.querySelector("#pairingSection");
@@ -19,6 +20,7 @@ const openPendingJdButton = document.querySelector("#openPendingJdButton");
 const clearPendingJdButton = document.querySelector("#clearPendingJdButton");
 
 let settings = await getSettings();
+renderPlatforms();
 render();
 
 pairButton.addEventListener("click", async () => {
@@ -60,13 +62,19 @@ resetButton.addEventListener("click", async () => {
   renderMessage("已解除本机绑定。", "ok");
 });
 
-openJdLoginButton.addEventListener("click", async () => {
-  await openPlatformLogin("jd");
-});
-
-openZkhLoginButton.addEventListener("click", async () => {
-  await openPlatformLogin("zkh");
-});
+// 副标题 + 平台登录按钮都从 platforms.js 注册表派生:加新平台(如 1688)自动出现,
+// 不用逐个改 popup。ehsy 是服务端采集、不在扩展 PLATFORMS 里,故不会渲染登录按钮(符合预期)。
+function renderPlatforms() {
+  headerSubtitle.textContent = `Chrome 扩展 · ${PLATFORMS.map((p) => p.label).join(" / ")}`;
+  platformLoginButtons.replaceChildren();
+  for (const platform of PLATFORMS) {
+    const button = document.createElement("button");
+    button.className = "secondary";
+    button.textContent = `打开${platform.label}登录`;
+    button.addEventListener("click", () => openPlatformLogin(platform.id));
+    platformLoginButtons.appendChild(button);
+  }
+}
 
 openPendingJdButton.addEventListener("click", async () => {
   const pending = settings.pendingJdVerification;

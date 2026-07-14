@@ -11,7 +11,7 @@
       <header class="header">
         <div>
           <h1>MRO 比价助手</h1>
-          <p>Chrome 扩展 · 京东工业品 / 震坤行</p>
+          <p id="headerSubtitle">Chrome 扩展</p>
         </div>
         <span id="stateBadge" class="badge">未绑定</span>
       </header>
@@ -54,10 +54,7 @@
 
       <section class="card">
         <label>平台登录</label>
-        <div class="actions">
-          <button id="openJdLoginButton" class="secondary">打开京东登录</button>
-          <button id="openZkhLoginButton" class="secondary">打开震坤行登录</button>
-        </div>
+        <div class="actions" id="platformLoginButtons"></div>
         <p class="hint">登录完成后点击“立即上报状态”，原查询内容会保留在 Web 比价卡片中。</p>
       </section>
 
